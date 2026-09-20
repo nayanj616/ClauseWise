@@ -55,6 +55,7 @@ describe("DocumentUpload Component", () => {
       storagePath: "user-123/99999999-9999-4999-a999-999999999999/Commercial Lease.pdf",
       mimeType: "application/pdf",
       fileSizeBytes: 2048,
+      pageCount: null,
       status: "queued",
       errorMessage: null,
       governingLaw: null,

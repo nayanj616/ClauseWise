@@ -73,23 +73,26 @@ Represents an uploaded legal document.
 | `created_at` | timestamp | |
 | `updated_at` | timestamp | |
 
-*Implementation status (Phase 1): `id`, `user_id`, `title`, `original_filename`, `storage_path`, `mime_type`, `file_size_bytes`, `status` (initial value: `queued`), `error_message`, `governing_law`, `jurisdiction`, `created_at`, and `updated_at` are implemented in Drizzle ORM (`lib/db/schema.ts`). Downstream extraction columns (`document_type`, `page_count`, `parties`, `metadata`) are introduced in Phases 2 and 3.*
+*Implementation status (Phase 1 & Phase 2 Slice 2.2): `id`, `user_id`, `title`, `original_filename`, `storage_path`, `mime_type`, `file_size_bytes`, `page_count`, `status` (initial value: `queued`), `error_message`, `governing_law`, `jurisdiction`, `created_at`, and `updated_at` are implemented in Drizzle ORM (`lib/db/schema.ts`). Downstream extraction columns (`document_type`, `parties`, `metadata`) are introduced in subsequent slices/phases.*
 
 ---
 
 ### DocumentSection
 A logical section within a document (e.g., a numbered clause, a heading).
+Implemented in PostgreSQL via Drizzle ORM table `document_sections` (Phase 2 Slice 2.2).
 
 | Field | Type | Notes |
 |---|---|---|
 | `id` | UUID | Primary key |
-| `document_id` | UUID | FK → Document |
+| `document_id` | UUID | FK → Document (`onDelete: cascade`) |
+| `order_index` | integer | 0-indexed sequence within document |
+| `section_number` | integer | Section number or identifier matching order_index |
 | `title` | string | Section heading or generated label |
-| `order_index` | integer | Sequence within document |
-| `page_start` | integer | Starting page number |
-| `page_end` | integer | Ending page number |
-| `raw_text` | text | Raw extracted text for this section |
-| `created_at` | timestamp | |
+| `content` | text | Raw extracted text for this section |
+| `page_start` | integer | 1-indexed starting page (PDF only; null for DOCX/TXT) |
+| `page_end` | integer | 1-indexed ending page (PDF only; null for DOCX/TXT) |
+| `created_at` | timestamp | Creation timestamp |
+| `updated_at` | timestamp | Last update timestamp |
 
 ---
 

@@ -37,6 +37,14 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
+const mockProcessDocumentExtraction = vi.fn();
+vi.mock("@/lib/services/extraction-persistence-service", () => ({
+  processDocumentExtraction: (...args: unknown[]) => mockProcessDocumentExtraction(...args),
+  persistDocumentExtraction: vi.fn(),
+  DocumentNotFoundError: class DocumentNotFoundError extends Error {},
+  ExtractionPersistenceError: class ExtractionPersistenceError extends Error {},
+}));
+
 import { uploadDocument, DatabaseError } from "@/lib/services/document-service";
 import { DocumentValidationError } from "@/lib/validation/document-validation";
 
@@ -211,5 +219,46 @@ describe("uploadDocument service", () => {
     const storagePath = mockUploadDocumentFile.mock.calls[0][0] as string;
     expect(storagePath.startsWith(`${TEST_USER_ID}/`)).toBe(true);
     expect(storagePath).not.toContain("..");
+  });
+
+  it("invokes processDocumentExtraction synchronously and returns ready document when processExtraction is true", async () => {
+    const file = createValidPdfFile("auto-process.pdf");
+    const mockCreatedDoc = {
+      id: "doc-uuid-9999",
+      userId: TEST_USER_ID,
+      title: "auto-process.pdf",
+      originalFilename: "auto-process.pdf",
+      storagePath: `${TEST_USER_ID}/doc-uuid-9999/auto-process.pdf`,
+      mimeType: "application/pdf",
+      fileSizeBytes: file.size,
+      pageCount: null,
+      status: "queued" as const,
+      errorMessage: null,
+      governingLaw: null,
+      jurisdiction: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    mockReturning.mockResolvedValueOnce([mockCreatedDoc]);
+
+    const mockReadyDoc = {
+      ...mockCreatedDoc,
+      status: "ready" as const,
+      pageCount: 2,
+    };
+    mockProcessDocumentExtraction.mockResolvedValueOnce({
+      document: mockReadyDoc,
+      sections: [],
+    });
+
+    const result = await uploadDocument({
+      userId: TEST_USER_ID,
+      file,
+      processExtraction: true,
+    });
+
+    expect(mockProcessDocumentExtraction).toHaveBeenCalledWith("doc-uuid-9999");
+    expect(result.status).toBe("ready");
+    expect(result.pageCount).toBe(2);
   });
 });

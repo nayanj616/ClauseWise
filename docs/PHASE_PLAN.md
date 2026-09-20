@@ -146,68 +146,68 @@ private Supabase Storage, and a Document record is created with status `queued`.
 
 ## Phase 2 — Text Extraction and Document Viewer
 
-**Goal:** Uploaded document text is extracted and sections are detected
-asynchronously after upload. The document workspace shows extracted content
-once processing completes. The upload HTTP request **does not block** on
-extraction.
+**Goal:** Uploaded document text is extracted and sections are detected and persisted.
+The document workspace shows extracted content once processing completes.
 
-### Processing Model (established here, extended in Phase 3)
+### Processing Model
 
 ```
-POST /api/documents/upload
-  → validate + store file → create Document (status: queued) → return 201
-  → [server] trigger processDocument(documentId) out-of-band
-
-processDocument(documentId):
-  → set status: extracting
-  → extractText() + detectSections() → save DocumentSection rows
-  → set status: extracted  (Phase 2 terminal state)
-  → [Phase 3 extends this to: chunking → embedding → analysis → ready]
+Upload Request
+  ↓
+Validate file (MIME, magic bytes, OOXML structure, size limit)
+  ↓
+Store file to private Supabase Storage
+  ↓
+Create Document record (status: queued)
+  ↓
+processDocumentExtraction(documentId) [Synchronous Server Processing]
+  ├─ update document status: extracting
+  ├─ download stored file from private storage
+  ├─ extractDocumentText()
+  └─ persistDocumentExtraction() [TRANSACTION]
+       ├─ delete previous document_sections (reprocessing idempotency)
+       ├─ insert new document_sections (preserve order, title, content, page coords)
+       └─ update document (status: ready, page_count)
+       ↓
+     COMMIT
+  ↓
+Return 201 Response with Processed Document
 ```
 
-**Trigger mechanism (MVP):** A Next.js Route Handler that calls
-`processDocument()` via a fire-and-forget `fetch` to itself using
-`waitUntil` (Vercel) or an equivalent non-blocking call. No external
-queue service is introduced in MVP.
+### Slice 2.1 — Extraction Infrastructure (✅ Complete)
+- Pure in-memory extraction engine (`lib/services/extraction-service.ts`)
+- PDF extraction via `unpdf` with native physical page mapping
+- DOCX extraction via `mammoth` with structural inspection
+- Plain text extraction with UTF-8 / ASCII encoding verification
+- Heuristic legal section detector (`lib/extraction/section-detector.ts`)
+- 36 dedicated unit tests covering format verification, section detection, and error safety
 
-**Status polling:** The UI polls `GET /api/documents/[id]/status`
-(or uses a short-interval client refetch) until status reaches `extracted`
-or `ready`. Document status is always visible in the workspace header and
-document list card.
-
-### Deliverables
-
-**Database**
-- `DocumentSection` schema
-- Drizzle migration
-- `Document.status` enum extended: `queued | extracting | extracted | chunking | analyzing | ready | error`
-
-**Domain service**
-- `extraction-service.ts`
-  - `extractText()` — PDF (pdf-parse) and DOCX (mammoth)
-  - `detectSections()` — heuristic heading/clause detection; saves sections to DB
-  - `processDocument()` — orchestrates extraction pipeline for one document;
-    updates status at each step; catches and records errors without crashing caller
-
-**API**
-- `POST /api/documents/[id]/process` — internal route that runs `processDocument()`;
-  called fire-and-forget after upload; protected (server-to-server only, not browser-accessible)
-- `GET /api/documents/[id]/status` — returns current `status` field for polling
-
-**UI**
-- Document Workspace shell (three-panel layout)
-- Left panel: section navigation
-- Center panel: document text viewer (rendered from extracted sections)
-- Right panel: placeholder (Phase 3)
-- Processing status banner in workspace and document list card
-- Status values shown to user: "Queued", "Extracting…", "Ready", "Error"
-
-**Tests**
-- Unit: `detectSections()` with various heading formats
-- Unit: `processDocument()` — status transitions (queued → extracting → extracted → error on failure)
-- Integration: trigger processDocument → sections created in DB; status updated (PostgreSQL test DB)
-- Integration: extraction failure → status set to `error`; no unhandled exception propagated
-- E2E: upload document → status badge updates → open workspace → see section navigation
+### Slice 2.2 — Extraction Persistence (✅ Complete)
+- **Database**:
+  - `document_sections` schema in `lib/db/schema.ts` (`id`, `document_id`, `order_index`, `section_number`, `title`, `content`, `page_start`, `page_end`, `created_at`, `updated_at`)
+  - `page_count` column added to `document` table
+  - Drizzle migration generated and applied (`0002_closed_living_tribunal.sql`)
+  - Relations defined (`documentsRelations.sections`, `documentSectionsRelations.document`)
+- **Storage Client**:
+  - `downloadDocumentFile()` added to `lib/storage/storage-client.ts`
+- **Domain Services**:
+  - `lib/services/extraction-persistence-service.ts`:
+    - `persistDocumentExtraction()`: transactional section persistence and document readiness
+    - `processDocumentExtraction()`: end-to-end extraction orchestrator for existing documents
+  - `lib/services/document-service.ts`:
+    - `uploadDocument()` updated with `processExtraction` option for synchronous processing
+    - Re-exports persistence functions and error classes
+- **Orchestration**:
+  - `POST /api/documents/upload` triggers synchronous extraction and persistence
+- **Transaction & Failure Handling**:
+  - Atomic transaction rollback prevents partial section commits or premature `ready` status
+  - Best-effort fallback status update to `error` outside transaction on failure
+  - Internal logging if fallback status update itself fails
+  - Preserves exact section ordering, titles, verbatim text, and PDF page coordinates (null for DOCX/TXT)
+  - Idempotent reprocessing: replaces existing sections without creating duplicates
+- **Tests**:
+  - 15 new persistence tests in `tests/unit/extraction-persistence.test.ts`
+  - 137 total automated tests passing across 9 test suites
 
 ---
 

@@ -116,6 +116,8 @@ export const documents = pgTable("document", {
   mimeType: text("mime_type").notNull(),
   /** File size in bytes */
   fileSizeBytes: integer("file_size_bytes").notNull(),
+  /** Total page count if determinable (PDF only; null for DOCX/TXT) */
+  pageCount: integer("page_count"),
   status: text("status", { enum: DOCUMENT_STATUS })
     .notNull()
     .default("queued"),
@@ -131,6 +133,34 @@ export const documents = pgTable("document", {
    * Null until extracted by the AI pipeline (Phase 3) or entered manually.
    */
   jurisdiction: text("jurisdiction"),
+  createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
+});
+
+// ---------------------------------------------------------------------------
+// DocumentSection — Phase 2
+// Represents a detected logical section or clause within a document.
+// ---------------------------------------------------------------------------
+
+export const documentSections = pgTable("document_sections", {
+  id: uuid("id")
+    .primaryKey()
+    .$defaultFn(() => crypto.randomUUID()),
+  documentId: uuid("document_id")
+    .notNull()
+    .references(() => documents.id, { onDelete: "cascade" }),
+  /** 0-indexed sequence within document */
+  orderIndex: integer("order_index").notNull(),
+  /** Section number or identifier matching orderIndex for conceptual compatibility */
+  sectionNumber: integer("section_number"),
+  /** Section heading or descriptive label */
+  title: text("title").notNull(),
+  /** Raw extracted text content for this section */
+  content: text("content").notNull(),
+  /** 1-indexed starting page (PDF only; null for DOCX/TXT) */
+  pageStart: integer("page_start"),
+  /** 1-indexed ending page (PDF only; null for DOCX/TXT) */
+  pageEnd: integer("page_end"),
   createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
 });
@@ -153,8 +183,16 @@ export const sessionsRelations = relations(sessions, ({ one }) => ({
   user: one(users, { fields: [sessions.userId], references: [users.id] }),
 }));
 
-export const documentsRelations = relations(documents, ({ one }) => ({
+export const documentsRelations = relations(documents, ({ one, many }) => ({
   user: one(users, { fields: [documents.userId], references: [users.id] }),
+  sections: many(documentSections),
+}));
+
+export const documentSectionsRelations = relations(documentSections, ({ one }) => ({
+  document: one(documents, {
+    fields: [documentSections.documentId],
+    references: [documents.id],
+  }),
 }));
 
 // ---------------------------------------------------------------------------
@@ -165,4 +203,6 @@ export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 export type Document = typeof documents.$inferSelect;
 export type NewDocument = typeof documents.$inferInsert;
+export type DocumentSection = typeof documentSections.$inferSelect;
+export type NewDocumentSection = typeof documentSections.$inferInsert;
 

@@ -117,3 +117,22 @@ export async function createSignedDocumentUrl(
   return data.signedUrl;
 }
 
+/**
+ * Download a document file buffer from Supabase Storage from the private documents bucket.
+ * Throws StorageError if the download fails.
+ */
+export async function downloadDocumentFile(storagePath: string): Promise<Buffer> {
+  const bucket = getDocumentsBucket();
+  const { data, error } = await bucket.download(storagePath);
+
+  if (error || !data) {
+    throw new StorageError(
+      `Failed to download file from storage: ${error?.message ?? "File not found"}`,
+      { cause: error }
+    );
+  }
+
+  const arrayBuffer = await data.arrayBuffer();
+  return Buffer.from(arrayBuffer);
+}
+

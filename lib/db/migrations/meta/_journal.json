@@ -15,6 +15,13 @@
       "when": 1789901747731,
       "tag": "0001_freezing_true_believers",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1789920256577,
+      "tag": "0002_closed_living_tribunal",
+      "breakpoints": true
     }
   ]
 }

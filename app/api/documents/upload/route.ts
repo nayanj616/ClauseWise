@@ -51,6 +51,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     const document = await uploadDocument({
       userId, // Strictly from verified session.user.id
       file,
+      processExtraction: true,
     });
 
     return NextResponse.json({ document }, { status: 201 });
