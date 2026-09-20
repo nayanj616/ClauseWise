@@ -46,3 +46,31 @@ export interface ApiError {
   detail?: string;
 }
 
+// ---------------------------------------------------------------------------
+// Document Extraction (Phase 2)
+// ---------------------------------------------------------------------------
+
+export type {
+  SupportedDocumentFormat,
+  ExtractedPage,
+  ExtractedSection,
+  ExtractionMetadata,
+  DocumentExtractionResult,
+  ExtractionInput,
+} from "@/lib/extraction/types";
+
+export {
+  SUPPORTED_DOCUMENT_FORMATS,
+} from "@/lib/extraction/types";
+
+export {
+  ExtractionErrorCode,
+  DocumentExtractionError,
+  UnsupportedFormatError,
+  MalformedDocumentError,
+  UnreadableDocumentError,
+  ExtractionFailedError,
+  EmptyContentError,
+} from "@/lib/extraction/errors";
+
+
