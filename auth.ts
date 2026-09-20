@@ -1,17 +1,11 @@
 /**
- * NextAuth.js v5 (Auth.js) configuration — ClauseWise
+ * NextAuth.js v5 (Auth.js) — full configuration — ClauseWise
  *
- * Strategy: JWT sessions with a Credentials provider.
- * The DrizzleAdapter is intentionally omitted for Phase 0:
- *   - JWT strategy does not persist sessions to the DB
- *   - Users are created via the signUpAction server action
- *   - The adapter will be added in Phase 10 when OAuth is introduced
+ * NODE.JS RUNTIME ONLY — do not import from middleware.ts.
+ * Middleware must import from auth.config.ts (Edge-safe, no bcrypt / no DB).
  *
- * The schema includes NextAuth support tables (account, session,
- * verification_token) so that adding the adapter later requires only
- * a config change, not a data migration.
- *
- * SERVER-SIDE ONLY — do not import handlers in client components.
+ * Strategy: JWT sessions + Credentials provider.
+ * DrizzleAdapter intentionally omitted for Phase 0 (added in Phase 10 for OAuth).
  */
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
@@ -20,9 +14,10 @@ import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
+import { authConfig } from "@/auth.config";
 
 // ---------------------------------------------------------------------------
-// Credentials schema — validated before any DB query
+// Credentials input schema
 // ---------------------------------------------------------------------------
 
 const credentialsSchema = z.object({
@@ -31,37 +26,25 @@ const credentialsSchema = z.object({
 });
 
 // ---------------------------------------------------------------------------
-// NextAuth configuration
+// NextAuth — merges authConfig (Edge-safe base) + credentials provider
 // ---------------------------------------------------------------------------
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
-  // JWT strategy: sessions are stored in a signed cookie, not the database.
-  // This removes the need for a sessions table in Phase 0.
-  session: { strategy: "jwt" },
-
-  // Custom pages — match the route group structure in app/(auth)/
-  pages: {
-    signIn: "/sign-in",
-    error: "/sign-in", // Auth errors redirect back to sign-in with ?error=
-  },
+  ...authConfig,
 
   providers: [
     Credentials({
-      // Field definitions inform the default sign-in UI (not used — we have
-      // a custom sign-in page, but the shape helps type inference)
       credentials: {
         email: { label: "Email", type: "email" },
         password: { label: "Password", type: "password" },
       },
 
       authorize: async (rawCredentials) => {
-        // 1. Validate input shape — reject malformed requests before DB hit
         const parsed = credentialsSchema.safeParse(rawCredentials);
         if (!parsed.success) return null;
 
         const { email, password } = parsed.data;
 
-        // 2. Look up user — single query, select only needed fields
         const [user] = await db
           .select({
             id: users.id,
@@ -73,14 +56,11 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           .where(eq(users.email, email))
           .limit(1);
 
-        // 3. Reject unknown users and OAuth-only accounts (no password hash)
         if (!user?.password) return null;
 
-        // 4. Constant-time password comparison (bcrypt handles this)
         const passwordMatch = await bcrypt.compare(password, user.password);
         if (!passwordMatch) return null;
 
-        // 5. Return the user shape that NextAuth encodes into the JWT
         return {
           id: user.id,
           email: user.email,
@@ -91,27 +71,29 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
   ],
 
   callbacks: {
-    /**
-     * Persist the user ID into the JWT on sign-in so it is available
-     * in every subsequent request without a DB round-trip.
-     */
+    ...authConfig.callbacks,
+
     jwt({ token, user }) {
       if (user?.id) {
-        token.id = user.id;
+        // user.id is a string from our authorize() return
+        token.id = user.id as string;
       }
       return token;
     },
 
-    /**
-     * Map the JWT id field to session.user.id for use in Server Components
-     * and Server Actions via the auth() call.
-     */
     session({ session, token }) {
       if (token.id) {
-        session.user.id = token.id;
+        /**
+         * NextAuth v5 beta: JWT module augmentation resolves token.id to
+         * `string` via types/next-auth.d.ts, but the type-checker may
+         * still infer `{}` after the truthiness guard in some compiler
+         * versions. The explicit cast is safe — token.id is always set as
+         * a string in the jwt() callback above.
+         */
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        session.user.id = token.id as any as string;
       }
       return session;
     },
   },
 });
-

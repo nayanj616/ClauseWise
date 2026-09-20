@@ -19,6 +19,8 @@ CREATE TABLE IF NOT EXISTS "document" (
 	"title" text NOT NULL,
 	"status" text DEFAULT 'queued' NOT NULL,
 	"error_message" text,
+	"governing_law" text,
+	"jurisdiction" text,
 	"created_at" timestamp DEFAULT now() NOT NULL,
 	"updated_at" timestamp DEFAULT now() NOT NULL
 );

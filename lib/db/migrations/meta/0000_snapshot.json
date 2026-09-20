@@ -1,5 +1,5 @@
 {
-  "id": "88251fdc-fa28-4a05-ad3f-32cedd80fde8",
+  "id": "ac5d0e3c-eddb-4559-bc16-4104f5df2db7",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -136,6 +136,18 @@
         },
         "error_message": {
           "name": "error_message",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "governing_law": {
+          "name": "governing_law",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "jurisdiction": {
+          "name": "jurisdiction",
           "type": "text",
           "primaryKey": false,
           "notNull": false
