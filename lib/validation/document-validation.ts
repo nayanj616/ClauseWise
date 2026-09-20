@@ -207,24 +207,32 @@ export function sanitizeFilename(
     return `document${validatedExtension}`;
   }
 
-  // 1. Strip null bytes and control characters
-  // eslint-disable-next-line no-control-regex
-  let clean = rawFilename.replace(/[\x00-\x1F\x7F]/g, "");
+  // 1. Decode URI components if present so encoded traversal (%2e%2e%2f) is normalized
+  let clean = rawFilename;
+  try {
+    clean = decodeURIComponent(clean);
+  } catch {
+    // If malformed URI, proceed with original string
+  }
 
-  // 2. Remove all directory paths (both forward and backward slashes)
+  // 2. Strip null bytes and control characters
+  // eslint-disable-next-line no-control-regex
+  clean = clean.replace(/[\x00-\x1F\x7F]/g, "");
+
+  // 3. Remove all directory paths (both forward and backward slashes)
   const forwardSegments = clean.split("/");
   clean = forwardSegments[forwardSegments.length - 1] ?? "";
   const backSegments = clean.split("\\");
   clean = backSegments[backSegments.length - 1] ?? "";
 
-  // 3. Strip any remaining path traversal tokens
+  // 4. Strip any remaining path traversal tokens
   clean = clean.replace(/\.\./g, "");
 
-  // 4. Extract stem by stripping the trailing extension (case-insensitive)
+  // 5. Extract stem by stripping the trailing extension (case-insensitive)
   const extRegex = new RegExp(`\\${validatedExtension}$`, "i");
   let stem = clean.replace(extRegex, "");
 
-  // 5. Sanitize stem:
+  // 6. Sanitize stem:
   // Replace internal dots and unsafe characters with underscores to prevent ambiguous extensions
   // e.g. "payload.exe" becomes "payload_exe"
   stem = stem.replace(/[^a-zA-Z0-9_-]/g, "_");
@@ -234,6 +242,12 @@ export function sanitizeFilename(
 
   // Trim leading/trailing underscores and hyphens
   stem = stem.replace(/^[-_]+|[-_]+$/g, "");
+
+  // Guard against Windows reserved device names
+  const WINDOWS_RESERVED = /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i;
+  if (WINDOWS_RESERVED.test(stem)) {
+    stem = `doc_${stem}`;
+  }
 
   // If stem is empty, fallback to "document"
   if (!stem) {

@@ -189,4 +189,63 @@ describe("POST /api/documents/upload", () => {
     const data = await res.json();
     expect(data.error).toBe("Failed to upload and process document");
   });
+
+  it("returns 401 Unauthorized when session has an empty string user id", async () => {
+    mockAuth.mockResolvedValueOnce({
+      user: { id: "", email: "user@example.com" },
+    });
+
+    const file = createMockPdfFile();
+    const req = createUploadRequest(file);
+    const res = await POST(req);
+
+    expect(res.status).toBe(401);
+    const data = await res.json();
+    expect(data.error).toBe("Unauthorized");
+    expect(mockUploadDocument).not.toHaveBeenCalled();
+  });
+
+  it("ensures 500 response hides sensitive database errors, credentials, and stack traces", async () => {
+    mockAuth.mockResolvedValueOnce({
+      user: { id: SESSION_USER_ID, email: "user@example.com" },
+    });
+
+    const sensitiveError = new Error(
+      "FATAL: password authentication failed for user 'postgres' at postgresql://postgres:secretpassword@db.supabase.co:5432"
+    );
+    mockUploadDocument.mockRejectedValueOnce(sensitiveError);
+
+    const file = createMockPdfFile();
+    const req = createUploadRequest(file);
+    const res = await POST(req);
+
+    expect(res.status).toBe(500);
+    const data = await res.json();
+    expect(data.error).toBe("Failed to upload and process document");
+    // Ensure no sensitive leakage
+    const responseText = JSON.stringify(data);
+    expect(responseText).not.toContain("password");
+    expect(responseText).not.toContain("postgres");
+    expect(responseText).not.toContain("supabase.co");
+    expect(responseText).not.toContain("stack");
+  });
+
+  it("returns 400 Bad Request when request is not valid multipart form data", async () => {
+    mockAuth.mockResolvedValueOnce({
+      user: { id: SESSION_USER_ID, email: "user@example.com" },
+    });
+
+    // Send JSON body instead of multipart/form-data
+    const req = new Request("http://localhost:3000/api/documents/upload", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file: "not-a-file" }),
+    });
+
+    const res = await POST(req);
+    expect(res.status).toBe(400);
+    const data = await res.json();
+    expect(data.error).toContain("form data");
+    expect(mockUploadDocument).not.toHaveBeenCalled();
+  });
 });

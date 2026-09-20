@@ -219,6 +219,34 @@ describe("sanitizeFilename", () => {
     );
   });
 
+  it("handles URL-encoded path traversal attacks safely", () => {
+    expect(sanitizeFilename("%2e%2e%2f%2e%2e%2fetc%2fpasswd.pdf", ".pdf")).toBe(
+      "passwd.pdf"
+    );
+    expect(sanitizeFilename("..%2f..%2fsecret.pdf", ".pdf")).toBe("secret.pdf");
+  });
+
+  it("handles Windows and Unix absolute paths by isolating base filename", () => {
+    expect(
+      sanitizeFilename("C:\\Users\\Admin\\Desktop\\contract.pdf", ".pdf")
+    ).toBe("contract.pdf");
+    expect(sanitizeFilename("/var/www/uploads/nda.docx", ".docx")).toBe(
+      "nda.docx"
+    );
+  });
+
+  it("safely handles Windows reserved device names", () => {
+    expect(sanitizeFilename("CON.pdf", ".pdf")).toBe("doc_CON.pdf");
+    expect(sanitizeFilename("NUL.docx", ".docx")).toBe("doc_NUL.docx");
+  });
+
+  it("prevents ambiguous script/executable double extensions", () => {
+    expect(sanitizeFilename("exploit.php.pdf", ".pdf")).toBe("exploit_php.pdf");
+    expect(sanitizeFilename("contract.pdf.docx", ".docx")).toBe(
+      "contract_pdf.docx"
+    );
+  });
+
   it("handles empty or dots-only stems safely", () => {
     expect(sanitizeFilename(".pdf", ".pdf")).toBe("document.pdf");
     expect(sanitizeFilename("...pdf", ".pdf")).toBe("document.pdf");
@@ -230,6 +258,7 @@ describe("generateStoragePath", () => {
     const docId = "22222222-2222-4222-a222-222222222222";
     const path = generateStoragePath(TEST_USER_ID, docId, "agreement.pdf");
     expect(path).toBe(`${TEST_USER_ID}/${docId}/agreement.pdf`);
+    expect(path.startsWith(`${TEST_USER_ID}/${docId}/`)).toBe(true);
   });
 
   it("rejects invalid UUIDs for user ID or document ID", () => {
@@ -242,6 +271,9 @@ describe("generateStoragePath", () => {
     const docId = "22222222-2222-4222-a222-222222222222";
     expect(() =>
       generateStoragePath(TEST_USER_ID, docId, "../escaped.pdf")
+    ).toThrow(DocumentValidationError);
+    expect(() =>
+      generateStoragePath(TEST_USER_ID, docId, "..\\escaped.pdf")
     ).toThrow(DocumentValidationError);
   });
 });
@@ -346,6 +378,48 @@ describe("validateDocumentUpload", () => {
     ).rejects.toThrow(/Invalid or malformed DOCX/);
   });
 
+  it("rejects DOCX bytes disguised as a PDF file", async () => {
+    const file = createMockFile(
+      "disguised.pdf",
+      "application/pdf",
+      createValidDocxBuffer()
+    );
+
+    await expect(
+      validateDocumentUpload({ file, userId: TEST_USER_ID })
+    ).rejects.toThrow(/Invalid or malformed PDF file/);
+  });
+
+  it("rejects PDF bytes disguised as a DOCX file", async () => {
+    const file = createMockFile(
+      "disguised.docx",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      createValidPdfBuffer()
+    );
+
+    await expect(
+      validateDocumentUpload({ file, userId: TEST_USER_ID })
+    ).rejects.toThrow(/Invalid or malformed DOCX file/);
+  });
+
+  it("rejects Windows PE executable bytes disguised as a PDF", async () => {
+    const peBuffer = Buffer.from("MZ\x90\x00\x03\x00\x00\x00\x04\x00\x00\x00\xff\xff\x00\x00");
+    const file = createMockFile("malware.pdf", "application/pdf", peBuffer);
+
+    await expect(
+      validateDocumentUpload({ file, userId: TEST_USER_ID })
+    ).rejects.toThrow(/Invalid or malformed PDF file/);
+  });
+
+  it("rejects shell script bytes disguised as a PDF", async () => {
+    const scriptBuffer = Buffer.from("#!/bin/bash\nrm -rf /\necho done\n%%EOF");
+    const file = createMockFile("script.pdf", "application/pdf", scriptBuffer);
+
+    await expect(
+      validateDocumentUpload({ file, userId: TEST_USER_ID })
+    ).rejects.toThrow(/Invalid or malformed PDF file/);
+  });
+
   it("rejects files larger than 10 MB", async () => {
     const largeBuffer = Buffer.alloc(MAX_FILE_SIZE_BYTES + 1);
     largeBuffer.write("%PDF-1.4", 0);
@@ -356,6 +430,27 @@ describe("validateDocumentUpload", () => {
       "application/pdf",
       largeBuffer
     );
+
+    await expect(
+      validateDocumentUpload({ file, userId: TEST_USER_ID })
+    ).rejects.toThrow(/exceeds the maximum limit of 10 MB/);
+  });
+
+  it("rejects file if buffer length exceeds 10 MB even if client file.size lied", async () => {
+    const largeBuffer = Buffer.alloc(MAX_FILE_SIZE_BYTES + 1);
+    largeBuffer.write("%PDF-1.4", 0);
+    largeBuffer.write("%%EOF", largeBuffer.length - 10);
+
+    const file = {
+      name: "spoofed_size.pdf",
+      type: "application/pdf",
+      size: 1000, // Spoofed small client size
+      arrayBuffer: async () =>
+        largeBuffer.buffer.slice(
+          largeBuffer.byteOffset,
+          largeBuffer.byteOffset + largeBuffer.byteLength
+        ) as ArrayBuffer,
+    };
 
     await expect(
       validateDocumentUpload({ file, userId: TEST_USER_ID })

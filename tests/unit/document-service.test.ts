@@ -164,4 +164,52 @@ describe("uploadDocument service", () => {
     expect(mockInsert).not.toHaveBeenCalled();
     expect(mockDeleteDocumentFile).not.toHaveBeenCalled();
   });
+
+  it("does not attempt database insertion when storage upload fails", async () => {
+    const file = createValidPdfFile("storage-fail.pdf");
+    mockUploadDocumentFile.mockRejectedValueOnce(
+      new Error("Supabase Storage unavailable")
+    );
+
+    await expect(
+      uploadDocument({
+        userId: TEST_USER_ID,
+        file,
+      })
+    ).rejects.toThrow("Supabase Storage unavailable");
+
+    // DB insert must never be reached if storage upload failed
+    expect(mockInsert).not.toHaveBeenCalled();
+    expect(mockDeleteDocumentFile).not.toHaveBeenCalled();
+  });
+
+  it("strictly enforces server-generated user namespace in storage path", async () => {
+    const file = createValidPdfFile("traversal.pdf");
+    const mockCreatedDoc = {
+      id: "doc-uuid-5678",
+      userId: TEST_USER_ID,
+      title: "traversal.pdf",
+      originalFilename: "traversal.pdf",
+      storagePath: `${TEST_USER_ID}/doc-uuid-5678/traversal.pdf`,
+      mimeType: "application/pdf",
+      fileSizeBytes: file.size,
+      status: "queued" as const,
+      errorMessage: null,
+      governingLaw: null,
+      jurisdiction: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    mockReturning.mockResolvedValueOnce([mockCreatedDoc]);
+
+    await uploadDocument({
+      userId: TEST_USER_ID,
+      file,
+    });
+
+    expect(mockUploadDocumentFile).toHaveBeenCalledTimes(1);
+    const storagePath = mockUploadDocumentFile.mock.calls[0][0] as string;
+    expect(storagePath.startsWith(`${TEST_USER_ID}/`)).toBe(true);
+    expect(storagePath).not.toContain("..");
+  });
 });
