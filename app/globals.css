@@ -1,0 +1,92 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* -----------------------------------------------------------------------
+   CSS custom properties — ClauseWise palette
+   Professional, trustworthy, calm (see docs/UX.md)
+   Base: slate blue — conveys authority without coldness
+   ----------------------------------------------------------------------- */
+
+@layer base {
+  :root {
+    /* Backgrounds */
+    --background: 210 20% 98%;
+    --foreground: 222 47% 11%;
+
+    /* Card surfaces */
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+
+    /* Popover */
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+
+    /* Primary — ClauseWise slate-blue */
+    --primary: 221 83% 33%;
+    --primary-foreground: 210 40% 98%;
+
+    /* Secondary — light slate */
+    --secondary: 210 40% 96%;
+    --secondary-foreground: 222 47% 11%;
+
+    /* Muted */
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 47%;
+
+    /* Accent */
+    --accent: 210 40% 94%;
+    --accent-foreground: 222 47% 11%;
+
+    /* Destructive */
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 210 40% 98%;
+
+    /* Attention — amber (needs_attention findings) */
+    --attention: 38 92% 50%;
+    --attention-foreground: 38 80% 10%;
+
+    /* Borders & inputs */
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: 221 83% 33%;
+
+    /* Border radius */
+    --radius: 0.5rem;
+
+    /* Typography */
+    --font-inter: "Inter", system-ui, sans-serif;
+  }
+
+  /* Dark mode — deferred to Phase 10 */
+  /* .dark { ... } */
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+
+  /* Focus visible — keyboard navigation accessibility */
+  :focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2;
+  }
+}
+
+@layer utilities {
+  /* Animate fade-in for page transitions */
+  .animate-fade-in {
+    animation: fade-in 0.2s ease-out;
+  }
+}
+

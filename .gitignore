@@ -1,0 +1,60 @@
+# === Dependencies ===
+node_modules/
+.pnpm-store/
+
+# === Next.js ===
+.next/
+out/
+build/
+
+# === Environment secrets — NEVER COMMIT ===
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# === Database ===
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+
+# === Uploaded documents — NEVER COMMIT ===
+uploads/
+tmp/
+
+# === Logs ===
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# === OS ===
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# === Editor ===
+.vscode/
+.idea/
+*.swp
+*.swo
+.cursor/
+
+# === Testing ===
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+coverage/
+.vitest-cache/
+
+# === Vercel ===
+.vercel/
+
+# === TypeScript ===
+*.tsbuildinfo
+next-env.d.ts
+
