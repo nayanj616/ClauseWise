@@ -75,42 +75,72 @@ user sessions, and document ownership enforced from day one.
 
 ---
 
-## Phase 1 — Secure Document Upload
+## Phase 1 — Secure Document Upload (✅ Complete)
 
-**Goal:** Users can upload a PDF or DOCX. File is validated, stored securely,
-and a Document record is created.
+**Goal:** Users can upload a PDF or DOCX. File is validated, stored securely in
+private Supabase Storage, and a Document record is created with status `queued`.
 
-### Deliverables
+### Deliverables (Implemented)
 
 **Database**
-- Full `Document` schema with all fields
-- Drizzle migration
+- `Document` schema extended with storage and metadata columns:
+  - `original_filename` (text, not null)
+  - `storage_path` (text, not null)
+  - `mime_type` (text, not null)
+  - `file_size_bytes` (integer, not null)
+  - `status` (initial value: `queued`)
+- Drizzle migration generated and verified (`0001_freezing_true_believers.sql`)
 
-**Domain service**
-- `document-service.ts`
-  - `uploadDocument()` — validates, sanitizes, stores, creates DB record
-  - `getDocument()` — with ownership check
-  - `listDocuments()` — for current user
-  - `deleteDocument()` — with ownership check + storage cleanup
+**Validation & Upload Client**
+- `lib/validation/document-validation.ts`
+  - Server-side authoritative validation: MIME type, file extension, 10 MB maximum size
+  - Magic byte inspection: `%PDF-` header and `%%EOF` trailer for PDF
+  - Structural archive inspection: valid ZIP with `[Content_Types].xml` and `word/` for DOCX
+  - Filename sanitization with URI decoding, path traversal prevention, and Windows reserved name guard
+  - Server-controlled storage path generation with strict user namespace confinement
+- `lib/upload/upload-client.ts`
+  - Client-side UX validation (immediate user feedback before upload)
+  - Safe API dispatch submitting multipart/form-data to `POST /api/documents/upload`
 
-**API / Server Action**
-- `POST /api/documents/upload` — multipart form, full validation pipeline
-- `GET /api/documents` — list
-- `DELETE /api/documents/[id]` — delete
+**Storage**
+- `lib/storage/storage-client.ts`
+  - Private Supabase Storage bucket (`documents`)
+  - Server-side service-role client (credentials never exposed to browser)
+  - Operations: `uploadDocumentFile()`, `deleteDocumentFile()`, `createSignedDocumentUrl()`
+
+**Domain Service**
+- `lib/services/document-service.ts`
+  - `uploadDocument()` — validates file, uploads to private storage, inserts DB record
+  - Enforces document ownership strictly from authenticated `session.user.id`
+  - Failure handling: rolls back storage object if database record creation fails to prevent orphaned files
+
+**API**
+- `POST /api/documents/upload`
+  - Requires authenticated NextAuth session (`401` on unauthenticated requests)
+  - Derives ownership strictly from `session.user.id` (ignores any client-supplied owner IDs)
+  - Returns `201` with created Document record on success
+  - Returns `400` with user-safe message on validation failure
+  - Returns `500` with generic message on unexpected failure (no stack traces, database details, or credentials exposed)
+  *(Note: Document retrieval `GET /api/documents` and deletion `DELETE /api/documents/[id]` belong to subsequent slices/phases.)*
 
 **UI**
-- Documents page with document list
-- Upload area (drag-and-drop + file picker)
-- Upload progress and success/error states
-- Document list card component
-- Document status badge
+- `components/document/DocumentUpload.tsx`
+  - Keyboard-accessible dropzone and file picker
+  - Clear indicators for supported formats (PDF, DOCX) and 10 MB limit
+  - Loading/progress spinner with `aria-busy` and disabled controls during upload
+  - Error alert with safe messages and retry capability
+  - Success state with document name and status badge, preserving document ID in state
+- `app/(app)/documents/page.tsx`
+  - Integrated upload UI replacing initial Phase 0 placeholder
 
 **Tests**
-- Unit: file validation logic (MIME, size, filename sanitization)
-- Unit: Zod schema validation (valid + invalid inputs)
-- Integration: upload → DB record created
-- Security: invalid MIME rejected; oversized file rejected; path traversal in filename rejected
-- E2E: upload a PDF → appears in document list
+- 85 automated tests passing across 7 suites covering:
+  - Unit validation: MIME, extensions, magic bytes, OOXML structure, size limits, path sanitization
+  - Domain service: storage upload, DB record insertion, session ownership, rollback on DB error
+  - Route handler: authentication check, ownership isolation, error safety, multipart parsing
+  - Client & UI: client UX validation, API dispatch mapping, accessible rendering, format indicators
+- TypeScript check: 0 errors (`npx tsc --noEmit`)
+- Production build: passed (`npx next build`)
 
 ---
 

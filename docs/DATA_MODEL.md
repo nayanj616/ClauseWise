@@ -2,8 +2,11 @@
 
 **Version:** 0.1 (living document)
 
-This is a **conceptual model only**. Database schema and migrations will be
-created during Phase 0 implementation.
+This document outlines the conceptual data model and schema roadmap for ClauseWise.
+The `users`, `accounts`, `sessions`, `verification_tokens`, and `documents` tables
+have been formally defined and migrated in PostgreSQL using Drizzle ORM (Phase 0 and Phase 1).
+Downstream entities (sections, chunks, findings, actions, conversations) and processing-specific
+columns are scheduled for implementation in subsequent phases.
 
 ---
 
@@ -69,6 +72,8 @@ Represents an uploaded legal document.
 | `metadata` | jsonb | Flexible key-value bag for any additional extracted metadata |
 | `created_at` | timestamp | |
 | `updated_at` | timestamp | |
+
+*Implementation status (Phase 1): `id`, `user_id`, `title`, `original_filename`, `storage_path`, `mime_type`, `file_size_bytes`, `status` (initial value: `queued`), `error_message`, `governing_law`, `jurisdiction`, `created_at`, and `updated_at` are implemented in Drizzle ORM (`lib/db/schema.ts`). Downstream extraction columns (`document_type`, `page_count`, `parties`, `metadata`) are introduced in Phases 2 and 3.*
 
 ---
 

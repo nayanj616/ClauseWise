@@ -12,18 +12,30 @@ Every AI response is grounded in document evidence, translated to plain English,
 
 ---
 
-## Features (Phase 0 — Foundation)
+## Features
 
+### Phase 0 — Foundation
 - ✅ Next.js 15 App Router + TypeScript (strict)
 - ✅ NextAuth.js v5 credentials authentication
 - ✅ Protected routes with server-side session enforcement
 - ✅ PostgreSQL + Drizzle ORM + pgvector (ready for Phase 3 embeddings)
-- ✅ Supabase Storage boundary (ready for Phase 1 uploads)
+- ✅ Supabase Storage boundary
 - ✅ OpenAI + Embeddings client boundaries (ready for Phase 3 analysis)
 - ✅ shadcn/ui component foundation
 - ✅ Security headers (CSP, X-Frame-Options, etc.)
 - ✅ Zod environment variable validation
 - ✅ Vitest + Playwright test setup
+
+### Phase 1 — Secure Document Upload
+- ✅ Multi-format file support: PDF (`.pdf`) and Word (`.docx`)
+- ✅ Strict 10 MB file size limit enforcement
+- ✅ Deep server-side file validation (MIME type, file extension, magic bytes: `%PDF-` and OOXML ZIP package inspection)
+- ✅ Strict filename sanitization (guards against path traversal, URI-encoded traversal, Windows reserved device names, and null bytes)
+- ✅ Private Supabase Storage bucket (`clausewise-documents`) with automatic rollback on DB failure
+- ✅ Authenticated NextAuth session enforcement with session-derived ownership (`session.user.id`)
+- ✅ Production API route `POST /api/documents/upload` returning initial document state (`status: queued`)
+- ✅ Accessible user-facing upload UI (`DocumentUpload`) with drag-and-drop, accessible names, live regions, and progress states
+- ✅ Comprehensive test suite with 85 passing tests across 7 suites
 
 ---
 
@@ -127,8 +139,9 @@ Create an account at `/sign-up`, then sign in to reach the Dashboard.
 ### 5. Run tests
 
 ```bash
-# Unit tests (Vitest) — no database required
+# Unit & integration tests (Vitest: 85 tests passing) — no database required
 pnpm test
+# or: npx vitest run
 
 # E2E tests (Playwright) — requires running dev server + database
 pnpm test:e2e
@@ -145,14 +158,18 @@ clausewise/
 │   ├── (app)/               # Protected pages (dashboard, documents, etc.)
 │   │   ├── layout.tsx       # Protected layout — calls requireSession()
 │   │   ├── dashboard/
-│   │   ├── documents/
+│   │   ├── documents/       # Document library & Phase 1 upload workspace
 │   │   ├── compare/
 │   │   └── actions/
 │   ├── actions/             # Server Actions
 │   │   └── auth.ts          # signInAction, signUpAction, signOutAction
-│   └── api/auth/            # NextAuth Route Handler
+│   └── api/
+│       ├── auth/            # NextAuth Route Handler
+│       └── documents/
+│           └── upload/      # POST /api/documents/upload (Phase 1)
 ├── components/
 │   ├── auth/                # SignInForm, SignUpForm
+│   ├── document/            # DocumentUpload (Phase 1 accessible UI)
 │   ├── shared/              # Sidebar, Logo
 │   └── ui/                  # shadcn/ui components
 ├── lib/
@@ -161,11 +178,14 @@ clausewise/
 │   ├── db/                  # Drizzle schema, client, migrations
 │   ├── embeddings/          # Embeddings client boundary
 │   ├── env.ts               # Zod env validation
-│   ├── storage/             # Supabase Storage boundary
+│   ├── services/            # Domain services (document-service.ts)
+│   ├── storage/             # Supabase Storage client & helpers
+│   ├── upload/              # Client-side upload handler (upload-client.ts)
+│   ├── validation/          # Document validation & sanitization (document-validation.ts)
 │   └── utils.ts             # cn(), formatDate(), truncate()
 ├── types/                   # Shared TypeScript types + NextAuth augmentation
 ├── tests/
-│   ├── unit/                # Vitest unit tests
+│   ├── unit/                # Vitest unit & component tests (85 passing tests)
 │   └── e2e/                 # Playwright E2E tests
 ├── scripts/
 │   └── db-setup.ts          # pgvector extension setup
@@ -182,7 +202,7 @@ clausewise/
 | Phase | Description | Status |
 |---|---|---|
 | 0 | Foundation (auth, DB, UI shell) | ✅ Complete |
-| 1 | Secure document upload | 🔜 |
+| 1 | Secure document upload | ✅ Complete |
 | 2 | Text extraction + document viewer | 🔜 |
 | 3 | Document intelligence (AI analysis) | 🔜 |
 | 4 | Evidence-backed analysis display | 🔜 |

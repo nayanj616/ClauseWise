@@ -48,23 +48,32 @@ const ALLOWED_MIME_TYPES = [
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
 ```
 
-### 3.3 Filename Sanitization
+### 3.3 Filename Sanitization & Path Confinement
+- Decode URI components to prevent encoded traversal tricks (`%2e%2e%2f`)
 - Strip path traversal characters (`../`, `..\\`)
+- Strip null bytes (`\0`) and control characters (`[\x00-\x1F\x7F]`)
 - Limit filename to ASCII alphanumeric, hyphens, underscores, dots
-- Enforce maximum filename length (255 chars)
-- Generate a UUID-based storage key; do not use the original filename as the storage path
+- Guard against Windows reserved device names (`CON`, `PRN`, `AUX`, `NUL`, etc.)
+- Prevent ambiguous double extensions (e.g. `malware.exe.pdf` → `malware_exe.pdf`)
+- Enforce maximum filename stem length (100 chars) while preserving validated extension
+- Construct server-controlled storage path strictly within user namespace: `${userId}/${documentId}/${sanitizedFilename}`
 
-### 3.4 Validation Order
-1. Check `Content-Type` header
-2. Check actual MIME type from file bytes (magic bytes check where possible)
-3. Check file size
-4. Sanitize filename
-5. Only then write to storage
+### 3.4 Validation Order & Authority
+1. Verify authentication via server-side session (`session.user.id`)
+2. Validate client-reported MIME type and extension
+3. Validate file size (0 < size ≤ 10 MB)
+4. Inspect buffer magic bytes and document structure:
+   - PDF: `%PDF-` header and `%%EOF` trailer marker
+   - DOCX: valid ZIP archive containing `[Content_Types].xml` and `word/` directory
+5. Sanitize filename and generate server-controlled UUID storage path
+6. Client-side validation exists strictly for UX feedback; the server remains authoritative
 
-### 3.5 Storage Access
-- Files are stored in a private Supabase Storage bucket
-- Presigned URLs for download are generated server-side, scoped to authenticated user, short-lived
-- The browser never receives permanent storage URLs
+### 3.5 Storage Privacy & Consistency
+- Files are stored in a private Supabase Storage bucket (`documents`)
+- No public URLs or credentials exposed to client code
+- Storage write occurs before database record insertion
+- **Rollback handling:** If database insertion fails after storage succeeds, the uploaded storage object is deleted immediately to prevent orphaned files
+- Document ownership is strictly bound to authenticated `session.user.id` (any client-supplied ownership identifiers are ignored)
 
 ---
 

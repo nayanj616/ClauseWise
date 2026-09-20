@@ -36,15 +36,47 @@ Priority order (aligned with competition scoring):
 Target: Pure functions with no external dependencies.
 
 Cover:
-- File validation logic (MIME type check, size check, filename sanitization)
+- File validation logic (MIME type check, magic bytes `%PDF-` / OOXML ZIP inspection, size check, filename sanitization, Windows reserved names)
 - Zod schema validation (valid and invalid inputs)
-- Text chunking algorithm
-- Finding parsing / Zod schema validation for AI responses
-- Date extraction and parsing
-- Comparison difference detection helpers
-- Error formatting utilities
+- Client-side pre-upload validation and API client error handling
+- React upload component accessibility and interaction states
+- Text chunking algorithm (Phase 2+)
+- Finding parsing / Zod schema validation for AI responses (Phase 3+)
+- Date extraction and parsing (Phase 3+)
+- Comparison difference detection helpers (Phase 6+)
+- Error formatting utilities and session helpers
 
 Location: `tests/unit/`
+
+**Current Test Suite (Phase 1 Baseline: 85 passing tests across 7 suites):**
+- `tests/unit/document-validation.test.ts` (34 tests):
+  - Magic byte verification: PDF (`%PDF-`), DOCX (ZIP `PK\x03\x04` and OOXML `[Content_Types].xml`).
+  - Size boundary validation: ≤ 10 MB accepted, > 10 MB rejected.
+  - Extension and MIME mismatch rejection.
+  - Filename sanitization: path traversal (`../`, `..\`), absolute paths, URI-encoded directory traversals (`%2e%2e%2f`), null bytes, Windows reserved device names (`CON`, `PRN`, `AUX`, `NUL`, `COM1-9`, `LPT1-9`), double extension prevention, punctuation normalization, length truncation (≤ 255 chars).
+- `tests/unit/upload-client.test.ts` (14 tests):
+  - Client-side validation: file selection, size limits, format restrictions.
+  - FormData construction and API response parsing.
+  - Error normalization for network failures, validation errors, and server errors.
+- `tests/unit/document-service.test.ts` (5 tests):
+  - Upload orchestration to private Supabase Storage (`clausewise-documents`).
+  - Creation of Document record with `status: queued`.
+  - Storage rollback: verified deletion of uploaded storage object if database insert fails.
+- `tests/unit/upload-route.test.ts` (9 tests):
+  - `POST /api/documents/upload` authentication enforcement (401 for unauthenticated requests).
+  - Session-derived ownership (document `userId` taken exclusively from `session.user.id`).
+  - FormData validation (400 for missing file or unexpected fields).
+  - Integration with server validation (400 with sanitized error for invalid files).
+  - HTTP 201 response with created document metadata.
+  - Clean error masking (500 without leaking database or internal stack traces).
+- `tests/unit/document-upload-ui.test.tsx` (3 tests):
+  - Accessible upload container: `role="region"` with accessible name (`aria-label="Document upload"`).
+  - Screen reader announcements: `aria-live="polite"` status area with file selection, uploading, and error states.
+  - Accessible interactive elements (file input with programmatic trigger).
+- `tests/unit/session.test.ts` (8 tests):
+  - `requireSession()`, `assertOwnership()`, unauthorized redirects and assertions.
+- `tests/unit/utils.test.ts` (12 tests):
+  - `cn()`, `formatDate()`, `truncate()` utilities.
 
 ### 3.2 Integration Tests (Vitest)
 
@@ -57,7 +89,7 @@ would not verify the queries that run in production. A dedicated test database
 Drizzle migrations.
 
 Cover:
-- `document-service` — upload, read, delete (real DB; mock Supabase Storage client)
+- `document-service` — upload, rollback, read, delete (real DB; mock Supabase Storage client)
 - `extraction-service` — `processDocument()` status transitions, section creation (real DB)
 - `analysis-service` — finding creation and retrieval (real DB; mock OpenAI client)
 - `retrieval-service` — vector search (real DB with pgvector; mock embedding client)
@@ -89,16 +121,21 @@ Location: `tests/e2e/`
 
 Treated as a first-class test category:
 
-| Scenario | Test type | Phase |
-|---|---|---|
-| Upload with invalid MIME type | Unit + E2E | Phase 1 |
-| Upload oversized file | Unit + E2E | Phase 1 |
-| Upload with path traversal in filename | Unit | Phase 1 |
-| Access another user's document | Integration | Phase 1 |
-| Prompt injection in document content | Integration (mock AI) | Phase 3 |
-| Zod validation rejection on bad API input | Unit | Phase 0 |
-| Missing required fields in API body | Unit | Phase 0 |
-| Stack trace not exposed in error response | Integration | Phase 0 |
+| Scenario | Test type | Phase | Status |
+|---|---|---|---|
+| Upload with invalid MIME type | Unit | Phase 1 | ✅ Tested |
+| Upload oversized file (> 10 MB) | Unit | Phase 1 | ✅ Tested |
+| Upload with path traversal in filename | Unit | Phase 1 | ✅ Tested |
+| Upload with URI-encoded path traversal | Unit | Phase 1 | ✅ Tested |
+| Upload with Windows reserved device name | Unit | Phase 1 | ✅ Tested |
+| Storage rollback on database insert failure | Unit | Phase 1 | ✅ Tested |
+| Unauthenticated upload rejection (401) | Unit | Phase 1 | ✅ Tested |
+| Session-derived ownership (no client ID) | Unit | Phase 1 | ✅ Tested |
+| Stack trace not exposed in upload error | Unit | Phase 1 | ✅ Tested |
+| Prompt injection in document content | Integration (mock AI) | Phase 3 | 🔜 Planned |
+| Zod validation rejection on bad API input | Unit | Phase 0 | ✅ Tested |
+| Missing required fields in API body | Unit | Phase 0 | ✅ Tested |
+| Stack trace not exposed in error response | Integration | Phase 0 | ✅ Tested |
 
 ---
 
