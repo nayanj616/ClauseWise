@@ -225,7 +225,14 @@ async function main(): Promise<void> {
 
     const [doc] = await db
       .insert(schema.documents)
-      .values({ userId: testUserId, title: "Verify Doc" })
+      .values({
+        userId: testUserId,
+        title: "Verify Doc",
+        originalFilename: "verify-doc.pdf",
+        storagePath: `${testUserId}/test-id/verify-doc.pdf`,
+        mimeType: "application/pdf",
+        fileSizeBytes: 1024,
+      })
       .returning({ id: schema.documents.id, userId: schema.documents.userId });
 
     if (!doc) throw new Error("document insert returned no rows");
@@ -268,6 +275,10 @@ async function main(): Promise<void> {
       await db.insert(schema.documents).values({
         userId: "00000000-0000-0000-0000-000000000000",
         title: "Orphan doc",
+        originalFilename: "orphan-doc.pdf",
+        storagePath: "00000000-0000-0000-0000-000000000000/test/orphan-doc.pdf",
+        mimeType: "application/pdf",
+        fileSizeBytes: 1024,
       });
     } catch {
       threw = true;

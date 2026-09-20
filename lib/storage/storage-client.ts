@@ -46,3 +46,74 @@ export function getDocumentsBucket() {
   return storageClient.storage.from(DOCUMENTS_BUCKET);
 }
 
+/**
+ * Custom error for storage operation failures.
+ */
+export class StorageError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = "StorageError";
+  }
+}
+
+/**
+ * Upload a document file buffer to Supabase Storage in the private documents bucket.
+ * Throws StorageError if the upload fails.
+ */
+export async function uploadDocumentFile(
+  storagePath: string,
+  buffer: Buffer | Uint8Array,
+  contentType: string
+): Promise<void> {
+  const bucket = getDocumentsBucket();
+  const { error } = await bucket.upload(storagePath, buffer, {
+    contentType,
+    upsert: false,
+  });
+
+  if (error) {
+    throw new StorageError(`Failed to upload file to storage: ${error.message}`, {
+      cause: error,
+    });
+  }
+}
+
+/**
+ * Delete a document file from the private documents bucket.
+ * Used for cleanup / rollback on failed operations.
+ */
+export async function deleteDocumentFile(storagePath: string): Promise<void> {
+  const bucket = getDocumentsBucket();
+  const { error } = await bucket.remove([storagePath]);
+
+  if (error) {
+    console.error(`[storage] Failed to delete file ${storagePath}:`, error);
+    throw new StorageError(`Failed to delete file from storage: ${error.message}`, {
+      cause: error,
+    });
+  }
+}
+
+/**
+ * Generate a short-lived presigned URL for secure download.
+ * Files are private and never publicly accessible.
+ */
+export async function createSignedDocumentUrl(
+  storagePath: string,
+  expiresInSeconds: number = 3600
+): Promise<string> {
+  const bucket = getDocumentsBucket();
+  const { data, error } = await bucket.createSignedUrl(
+    storagePath,
+    expiresInSeconds
+  );
+
+  if (error || !data?.signedUrl) {
+    throw new StorageError(
+      `Failed to create signed URL: ${error?.message ?? "unknown error"}`
+    );
+  }
+
+  return data.signedUrl;
+}
+

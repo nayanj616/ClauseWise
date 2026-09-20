@@ -108,6 +108,14 @@ export const documents = pgTable("document", {
     .references(() => users.id, { onDelete: "cascade" }),
   /** User-editable display name; defaults to the original filename in Phase 1 */
   title: text("title").notNull(),
+  /** Sanitized original filename */
+  originalFilename: text("original_filename").notNull(),
+  /** Path in Supabase Storage (never exposed to browser) */
+  storagePath: text("storage_path").notNull(),
+  /** Validated MIME type (application/pdf or application/vnd.openxmlformats...) */
+  mimeType: text("mime_type").notNull(),
+  /** File size in bytes */
+  fileSizeBytes: integer("file_size_bytes").notNull(),
   status: text("status", { enum: DOCUMENT_STATUS })
     .notNull()
     .default("queued"),

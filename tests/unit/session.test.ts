@@ -74,6 +74,7 @@ describe("requireSession", () => {
   });
 
   it("redirects to /sign-in when no session exists", async () => {
+    // @ts-expect-error — auth() overload typing
     mockAuth.mockResolvedValueOnce(null);
 
     await expect(requireSession()).rejects.toThrow("NEXT_REDIRECT:/sign-in");
@@ -81,6 +82,7 @@ describe("requireSession", () => {
   });
 
   it("redirects to /sign-in when session has no user id", async () => {
+    // @ts-expect-error — auth() overload typing
     mockAuth.mockResolvedValueOnce({
       user: { email: "test@example.com" }, // no id
       expires: new Date().toISOString(),
