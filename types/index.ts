@@ -29,6 +29,12 @@ export type {
   NewDocumentSection,
   DocumentChunk,
   NewDocumentChunk,
+  DocumentFinding,
+  NewDocumentFinding,
+  FindingType,
+  FindingImportance,
+  FINDING_TYPES,
+  FINDING_IMPORTANCE,
 } from "@/lib/db/schema";
 export type {
   WorkspaceDocument,
@@ -90,5 +96,51 @@ export {
   ExtractionFailedError,
   EmptyContentError,
 } from "@/lib/extraction/errors";
+
+// ---------------------------------------------------------------------------
+// Document Intelligence (Phase 3)
+// ---------------------------------------------------------------------------
+
+export type {
+  IntelligenceInputSection,
+  IntelligenceInputChunk,
+  IntelligenceInputPayload,
+  InputBoundingMetadata,
+  ValidatedFinding,
+  ValidatedParty,
+  ValidatedGoverningLaw,
+  ValidatedJurisdiction,
+  ValidatedImportantSection,
+  ValidatedClassification,
+  ValidatedIntelligenceResult,
+  RawAiIntelligenceResponse,
+  RawAiFinding,
+  SubstantiveAiFinding,
+  MissingInfoAiFinding,
+} from "@/lib/intelligence/types";
+
+export {
+  FindingTypeSchema,
+  SubstantiveFindingTypeSchema,
+  FindingImportanceSchema,
+  RawAiFindingSchema,
+  SubstantiveAiFindingSchema,
+  MissingInfoAiFindingSchema,
+  RawAiPartySchema,
+  RawAiGoverningLawSchema,
+  RawAiJurisdictionSchema,
+  RawAiImportantSectionSchema,
+  RawAiClassificationSchema,
+  RawAiIntelligenceResponseSchema,
+} from "@/lib/intelligence/schemas";
+
+export {
+  CORE_PROVISION_CATALOG,
+  getAllowableExpectedTopics,
+  isExpectedTopicAllowed,
+} from "@/lib/intelligence/expectation-catalog";
+
+export type { IntelligencePersistenceResult } from "@/lib/services/intelligence-persistence-service";
+
 
 

@@ -60,6 +60,9 @@ describe("DocumentUpload Component", () => {
       errorMessage: null,
       governingLaw: null,
       jurisdiction: null,
+      documentType: null,
+      parties: null,
+      metadata: null,
       createdAt: new Date(),
       updatedAt: new Date(),
     };

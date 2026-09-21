@@ -280,65 +280,73 @@ Return 201 Response with Processed Document
 
 ---
 
-## Phase 3 — Document Intelligence
+## Phase 3 — Document Intelligence Contract & Infrastructure (✅ Complete)
 
-**Goal:** The async `processDocument()` pipeline established in Phase 2 is
-extended to cover chunking, embedding, and AI analysis. Once extraction
-completes, the pipeline continues automatically — no new HTTP request from
-the browser is needed. The Document Workspace shows the Overview and Analyze
-tabs once `status = ready`.
+**Goal:** Establish and implement the technical contract for AI-powered document
+intelligence, strictly enforcing that the LLM is never the source of truth,
+and ensuring all substantive findings and metadata have verifiable evidence
+rooted in persisted Phase 2 sections.
 
-**Extended pipeline (Phase 3 adds the bottom half):**
+### Intelligence Pipeline:
 ```
-processDocument(documentId):
-  → [Phase 2] extracting → extracted
-  → [Phase 3] chunking  → chunk + embed each section
-  → [Phase 3] analyzing → classify document, extract findings
-  → ready
-  (error at any step → status: error, error_message saved)
+Persisted document sections
+  ↓
+Deterministic input bounding (max 240,000 chars, no silent loss)
+  ↓
+LLM inference (OpenAI gpt-4o Structured Outputs with security prompt wrapper)
+  ↓
+Discriminated schema validation (Zod)
+  ↓
+Deterministic evidence validation (verifies source text in section; matches chunk & page)
+  ↓
+Idempotent persistence (atomic transaction; deletes prior findings for document)
 ```
 
-### Deliverables
+### Deliverables (Implemented & Verified):
 
-**Database**
-- `DocumentChunk` schema (with `embedding vector(1536)`)
-- `DocumentFinding` schema
-- `Obligation` schema
-- `ImportantDate` schema
-- Drizzle migrations + pgvector index
+**Database & Migration**
+- `document_findings` schema in `lib/db/schema.ts` (`id`, `document_id`, `section_id`, `chunk_id`, `finding_type`, `importance`, `label`, `summary`, `source_text`, `page_number`, `metadata`, `created_at`, `updated_at`)
+- `document` schema extended with `document_type`, `parties`, and `metadata` (with `governing_law` and `jurisdiction`)
+- Foreign keys with `onDelete: cascade` (and `onDelete: set null` for chunk reference)
+- Performance indexes on `document_id`, `finding_type`, and `importance`
+- Drizzle migration generated and applied (`0004_flawless_maximus.sql`)
+- Database naming strictly resolved: Drizzle `documents` → SQL `"document"`, `documentFindings` → SQL `"document_findings"`
 
-**Domain service**
-- `chunking-service.ts` — section-aware chunking, max ~500 tokens, overlap
-- `embeddings-service.ts` — embed chunks, store vectors
-- `analysis-service.ts`
-  - `classifyDocument()` — document type, parties, governing law
-  - `extractFindings()` — structured findings extraction (OpenAI structured output)
-  - `extractObligations()`
-  - `extractImportantDates()`
-- `extraction-service.processDocument()` — extended to call chunking + embedding + analysis
-  steps after extraction; sets `status: chunking` → `analyzing` → `ready`
+**Domain Core & Validation**
+- `lib/intelligence/expectation-catalog.ts`:
+  - Authoritative core provision catalog for major document types (`nda`, `employment_agreement`, `lease_agreement`, `service_agreement`, `commercial_contract`, `general`)
+  - Prevents the model from inventing arbitrary checklists for `missing_information`
+- `lib/intelligence/schemas.ts`:
+  - Discriminated union on `findingType`: substantive findings strictly require non-empty `sourceText` and `sectionOrderIndex`; `missing_information` allows null `sourceText` and requires `expectedTopic` and `ruleBasis`
+  - Evidenced metadata schemas for `parties`, `governingLaw`, `jurisdiction`, `importantSections`, and `classification`
+  - Strict absence of numerical risk scores (`.strict()`)
+- `lib/intelligence/prompts.ts`:
+  - Untrusted document content wrapper (`=== UNTRUSTED DOCUMENT CONTENT ===`)
+  - Anti-injection directive and non-lawyer assistant role definition
+  - Deterministic input bounding: caps context at 240,000 chars without dropping preambles or closings, recording bounding telemetry
+- `lib/intelligence/evidence-validator.ts`:
+  - Deterministic grounding engine verifying exact/whitespace-normalized excerpts against persisted section text
+  - Resolves matching `chunk_id` and propagates `pageNumber` from persisted records
+  - Extends validation beyond findings to all factual metadata (`parties`, `governingLaw`, `jurisdiction`, `importantSections`, `documentType`)
+  - Enforces material failure guard vs dropped candidate distinction
 
-**AI Prompts**
-- System prompt template with security wrapper
-- Classification prompt
-- Findings extraction prompt (with Zod-validated output schema)
+**Domain Services**
+- `lib/services/intelligence-service.ts`:
+  - Pure domain orchestrator: fetches sections, bounds context, invokes OpenAI Structured Outputs, validates schema, validates evidence, enforces failure guards
+- `lib/services/intelligence-persistence-service.ts`:
+  - `persistDocumentIntelligence()`: atomic transactional persistence with reprocessing idempotency
+  - `processDocumentIntelligence()`: orchestrates analysis and persistence, setting status `analyzing` → `ready` (or `error` on failure without corrupting Phase 2 data)
 
-**UI**
-- Right panel: Overview tab (summary, parties, key terms, financial terms)
-- Right panel: Analyze tab (findings list, grouped by type)
-- Finding card component with badge, summary, source reference
-- Click finding → scroll center panel to source section
-- Status polling continues: workspace reflects `chunking` → `analyzing` → `ready` states
+**Tests & Quality**
+- 222 total automated tests passing across 18 test suites in Vitest:
+  - `tests/unit/expectation-catalog.test.ts` (catalog lookup, normalization, rejection of invented topics)
+  - `tests/unit/intelligence-schemas.test.ts` (discriminated union, required sourceText, rejection of risk scores)
+  - `tests/unit/evidence-validator.test.ts` (grounding checks, chunk mapping, metadata validation, candidate drops)
+  - `tests/unit/intelligence-service.test.ts` (OpenAI mock, refusal handling, bounding, material failure guard)
+  - `tests/unit/intelligence-persistence.test.ts` (atomic commit, reprocessing idempotency, failure safety)
+- TypeScript: 0 errors (`npx tsc --noEmit`)
+- Next.js Production Build: passed (`next build`)
 
-**Tests**
-- Unit: chunking algorithm (overlap, size limits)
-- Unit: Zod schema for findings (valid + invalid AI responses)
-- Unit: prompt injection test (document content cannot override system instructions — mock AI)
-- Integration: full pipeline on extracted document → chunks + embeddings + findings in DB
-  (mock OpenAI; real PostgreSQL + pgvector test DB)
-- Integration: analysis pass → findings created (mock OpenAI with valid response)
-- Integration: pipeline failure mid-way → status error; previously committed rows not corrupted
-- E2E: upload document → status progresses through states → workspace populated
 
 ---
 

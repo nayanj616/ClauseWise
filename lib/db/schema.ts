@@ -12,6 +12,8 @@ import {
   uuid,
   integer,
   primaryKey,
+  jsonb,
+  index,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 
@@ -133,6 +135,20 @@ export const documents = pgTable("document", {
    * Null until extracted by the AI pipeline (Phase 3) or entered manually.
    */
   jurisdiction: text("jurisdiction"),
+  /**
+   * The classified type of document (e.g. "nda", "employment_agreement").
+   * Extracted by the AI pipeline (Phase 3).
+   */
+  documentType: text("document_type"),
+  /**
+   * Parties identified in the document.
+   * Extracted by the AI pipeline (Phase 3).
+   */
+  parties: jsonb("parties").$type<Array<{ name: string; role: string | null }>>(),
+  /**
+   * Additional structured metadata bag (e.g. executiveSummary, inputBounding telemetry).
+   */
+  metadata: jsonb("metadata").$type<Record<string, unknown>>(),
   createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
 });
@@ -200,6 +216,61 @@ export const documentChunks = pgTable("document_chunks", {
 });
 
 // ---------------------------------------------------------------------------
+// DocumentFinding — Phase 3
+// Represents an AI-extracted finding grounded in persisted document evidence.
+// ---------------------------------------------------------------------------
+
+export const FINDING_TYPES = [
+  "key_term",
+  "attention",
+  "obligation",
+  "ambiguity",
+  "date",
+  "financial_term",
+  "inconsistency",
+  "missing_information",
+] as const;
+
+export type FindingType = (typeof FINDING_TYPES)[number];
+
+export const FINDING_IMPORTANCE = [
+  "needs_attention",
+  "important",
+  "informational",
+] as const;
+
+export type FindingImportance = (typeof FINDING_IMPORTANCE)[number];
+
+export const documentFindings = pgTable("document_findings", {
+  id: uuid("id")
+    .primaryKey()
+    .$defaultFn(() => crypto.randomUUID()),
+  documentId: uuid("document_id")
+    .notNull()
+    .references(() => documents.id, { onDelete: "cascade" }),
+  sectionId: uuid("section_id")
+    .references(() => documentSections.id, { onDelete: "cascade" }),
+  chunkId: uuid("chunk_id")
+    .references(() => documentChunks.id, { onDelete: "set null" }),
+  findingType: text("finding_type", { enum: FINDING_TYPES }).notNull(),
+  importance: text("importance", { enum: FINDING_IMPORTANCE }).notNull(),
+  label: text("label").notNull(),
+  summary: text("summary").notNull(),
+  /** Verbatim source excerpt from document content (null only for missing_information) */
+  sourceText: text("source_text"),
+  /** 1-indexed page number derived from persisted section/chunk coordinates */
+  pageNumber: integer("page_number"),
+  /** Type-specific structured metadata (e.g. dateValue, amount, conflicting excerpt) */
+  metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+  createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
+}, (t) => ({
+  documentIdIdx: index("idx_document_findings_document_id").on(t.documentId),
+  findingTypeIdx: index("idx_document_findings_finding_type").on(t.findingType),
+  importanceIdx: index("idx_document_findings_importance").on(t.importance),
+}));
+
+// ---------------------------------------------------------------------------
 // Relations (Drizzle relational query API)
 // ---------------------------------------------------------------------------
 
@@ -221,6 +292,7 @@ export const documentsRelations = relations(documents, ({ one, many }) => ({
   user: one(users, { fields: [documents.userId], references: [users.id] }),
   sections: many(documentSections),
   chunks: many(documentChunks),
+  findings: many(documentFindings),
 }));
 
 export const documentSectionsRelations = relations(documentSections, ({ one, many }) => ({
@@ -229,9 +301,10 @@ export const documentSectionsRelations = relations(documentSections, ({ one, man
     references: [documents.id],
   }),
   chunks: many(documentChunks),
+  findings: many(documentFindings),
 }));
 
-export const documentChunksRelations = relations(documentChunks, ({ one }) => ({
+export const documentChunksRelations = relations(documentChunks, ({ one, many }) => ({
   document: one(documents, {
     fields: [documentChunks.documentId],
     references: [documents.id],
@@ -239,6 +312,22 @@ export const documentChunksRelations = relations(documentChunks, ({ one }) => ({
   section: one(documentSections, {
     fields: [documentChunks.sectionId],
     references: [documentSections.id],
+  }),
+  findings: many(documentFindings),
+}));
+
+export const documentFindingsRelations = relations(documentFindings, ({ one }) => ({
+  document: one(documents, {
+    fields: [documentFindings.documentId],
+    references: [documents.id],
+  }),
+  section: one(documentSections, {
+    fields: [documentFindings.sectionId],
+    references: [documentSections.id],
+  }),
+  chunk: one(documentChunks, {
+    fields: [documentFindings.chunkId],
+    references: [documentChunks.id],
   }),
 }));
 
@@ -254,5 +343,7 @@ export type DocumentSection = typeof documentSections.$inferSelect;
 export type NewDocumentSection = typeof documentSections.$inferInsert;
 export type DocumentChunk = typeof documentChunks.$inferSelect;
 export type NewDocumentChunk = typeof documentChunks.$inferInsert;
+export type DocumentFinding = typeof documentFindings.$inferSelect;
+export type NewDocumentFinding = typeof documentFindings.$inferInsert;
 
 
