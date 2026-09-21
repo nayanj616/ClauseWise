@@ -37,6 +37,35 @@ Every AI response is grounded in document evidence, translated to plain English,
 - ✅ Accessible user-facing upload UI (`DocumentUpload`) with drag-and-drop, accessible names, live regions, and progress states
 - ✅ Comprehensive test suite with 85 passing tests across 7 suites
 
+### Phase 2 — Text Extraction & Document Viewer
+- ✅ Pure in-memory extraction engine: native PDF extraction (`unpdf`), DOCX structure inspection (`mammoth`), and UTF-8 plain text
+- ✅ Heuristic legal section detector and sequential section ordering
+- ✅ Transactional section persistence (`document_sections` schema) with exact order, titles, and page coordinates
+- ✅ Deterministic section-to-chunk segmentation (`document_chunks` schema) with paragraph/sentence preservation
+- ✅ Extracted document viewer (`DocumentViewer`) with section navigation and responsive layouts
+- ✅ Safe error and processing states (`DocumentProcessingState`, `DocumentErrorState`, `EmptyContentState`)
+
+### Phase 3 — Document Intelligence & Grounded Workspace (CLOSED)
+- ✅ Evidence-first intelligence contract: LLM is an inference mechanism, never the source of truth
+- ✅ Server-side OpenAI infrastructure (`lib/ai/openai-client.ts`) with typed error handling
+- ✅ Anti-injection security wrappers (`=== UNTRUSTED DOCUMENT CONTENT ===`) and deterministic context bounding (240k chars)
+- ✅ Grounded document classification (`classifyDocument`) with explicit text-stated vs inferred provenance
+- ✅ Structured metadata extraction (`extractDocumentMetadata`): parties, governing law, jurisdiction, dates, financial terms
+- ✅ Grounded findings generation (`generateDocumentFindings`): obligations, key terms, attention items, ambiguities, inconsistencies
+- ✅ Absence-based `missing_information` findings grounded strictly in `CORE_PROVISION_CATALOG` with zero fake citations
+- ✅ Pure deterministic evidence validator (`verifySectionExcerptEvidence`): exact/whitespace-normalized matching, authoritative DB IDs
+- ✅ Multi-document & cross-tenant isolation: mismatched document IDs deterministically rejected
+- ✅ Atomic transactional persistence (`persistDocumentIntelligence`) with reprocessing idempotency
+- ✅ Failure isolation: AI errors transition document to `status: error` without mutating Phase 2 sections or chunks
+- ✅ Grounded Intelligence Workspace:
+  - `DocumentHeader`: Document metadata, processing status, classification badge, and tab navigation
+  - `DocumentOverview`: Structured cards for Parties, Governing Law, Jurisdiction, Key Dates, Financial Terms, and Executive Summary (display-only, Guardrail 1)
+  - `ImportantSections`: Priority sections with jump-to-section navigation triggers
+  - `FindingCard` & `EvidencePanel`: Master-detail inspector with verbatim excerpts, verified provenance, and "View in Document Text" action
+  - `FindingList`: Deterministic filtering by priority (`All`, `Needs Attention`, `Important`, `Informational`) and finding types
+- ✅ Strict absence of numerical legal-risk scores across schemas, domain types, and UI
+- ✅ Comprehensive Phase 3 verification suite with 413 tests passing across 24 test files
+
 ---
 
 ## Architecture
@@ -46,15 +75,30 @@ UI (app/components)
   ↓
 Server Actions / Route Handlers (app/actions, app/api)
   ↓
-Domain Services (lib/services)        ← Phase 1+ adds services here
+Domain Services (lib/services)
+  ↓
+Domain Core & Validation (lib/intelligence)
   ↓
 Infrastructure (lib/db, lib/storage, lib/ai, lib/embeddings)
 ```
 
-**Document Processing Pipeline** (Phase 2+, async by design):
+**Evidence-First Intelligence Pipeline:**
 ```
-POST /api/documents/upload  →  validate → store → DB record (status: queued) → return 201
-[Out-of-band] processDocument(id): extracting → chunking → analyzing → ready
+Persisted Sections
+    ↓
+Deterministic Chunks
+    ↓
+Bounded Intelligence Input (max 240k chars)
+    ↓
+LLM Structured Output (gpt-4o)
+    ↓
+Zod Schema Validation
+    ↓
+Deterministic Evidence Validation
+    ↓
+Atomic Persistence (document_findings)
+    ↓
+Grounded Intelligence Workspace
 ```
 
 ---
@@ -139,7 +183,7 @@ Create an account at `/sign-up`, then sign in to reach the Dashboard.
 ### 5. Run tests
 
 ```bash
-# Unit & integration tests (Vitest: 85 tests passing) — no database required
+# Unit & integration tests (Vitest: 413 tests passing across 24 suites) — no database required
 pnpm test
 # or: npx vitest run
 
@@ -158,7 +202,8 @@ clausewise/
 │   ├── (app)/               # Protected pages (dashboard, documents, etc.)
 │   │   ├── layout.tsx       # Protected layout — calls requireSession()
 │   │   ├── dashboard/
-│   │   ├── documents/       # Document library & Phase 1 upload workspace
+│   │   ├── documents/       # Document library & upload workspace
+│   │   │   └── [documentId]/# Grounded Intelligence Workspace
 │   │   ├── compare/
 │   │   └── actions/
 │   ├── actions/             # Server Actions
@@ -166,26 +211,29 @@ clausewise/
 │   └── api/
 │       ├── auth/            # NextAuth Route Handler
 │       └── documents/
-│           └── upload/      # POST /api/documents/upload (Phase 1)
+│           └── upload/      # POST /api/documents/upload
 ├── components/
 │   ├── auth/                # SignInForm, SignUpForm
-│   ├── document/            # DocumentUpload (Phase 1 accessible UI)
+│   ├── document/            # DocumentUpload (accessible UI)
+│   ├── workspace/           # DocumentWorkspace, Header, Overview, FindingCard, EvidencePanel, FindingList
 │   ├── shared/              # Sidebar, Logo
 │   └── ui/                  # shadcn/ui components
 ├── lib/
-│   ├── ai/                  # OpenAI client boundary
+│   ├── ai/                  # OpenAI client boundary (openai-client.ts)
 │   ├── auth/                # Session utilities (requireSession, assertOwnership)
 │   ├── db/                  # Drizzle schema, client, migrations
 │   ├── embeddings/          # Embeddings client boundary
 │   ├── env.ts               # Zod env validation
-│   ├── services/            # Domain services (document-service.ts)
+│   ├── extraction/          # Legal section detector heuristics
+│   ├── intelligence/        # Evidence validator, expectation catalog, schemas, prompts
+│   ├── services/            # Domain services (document, extraction, chunking, intelligence)
 │   ├── storage/             # Supabase Storage client & helpers
 │   ├── upload/              # Client-side upload handler (upload-client.ts)
 │   ├── validation/          # Document validation & sanitization (document-validation.ts)
 │   └── utils.ts             # cn(), formatDate(), truncate()
 ├── types/                   # Shared TypeScript types + NextAuth augmentation
 ├── tests/
-│   ├── unit/                # Vitest unit & component tests (85 passing tests)
+│   ├── unit/                # Vitest unit & integration tests (413 passing tests across 24 suites)
 │   └── e2e/                 # Playwright E2E tests
 ├── scripts/
 │   └── db-setup.ts          # pgvector extension setup
@@ -203,9 +251,9 @@ clausewise/
 |---|---|---|
 | 0 | Foundation (auth, DB, UI shell) | ✅ Complete |
 | 1 | Secure document upload | ✅ Complete |
-| 2 | Text extraction + document viewer | 🔜 |
-| 3 | Document intelligence (AI analysis) | 🔜 |
-| 4 | Evidence-backed analysis display | 🔜 |
+| 2 | Text extraction + document viewer | ✅ Complete |
+| 3 | Document intelligence (AI analysis) | ✅ Complete (Closed) |
+| 4 | Evidence-backed analysis display | 🔜 Next |
 | 5 | AI QA chat | 🔜 |
 | 6 | Document comparison | 🔜 |
 | 7 | Action plans | 🔜 |

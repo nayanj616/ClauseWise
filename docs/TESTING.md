@@ -48,7 +48,12 @@ Cover:
 
 Location: `tests/unit/`
 
-**Current Test Suite (Phase 1 Baseline: 85 passing tests across 7 suites):**
+**Current Test Suite (Phase 3 Complete: 413 passing tests across 24 suites):**
+- **Phase 0 & 1 Baseline (85 tests across 7 suites):** Upload validation, client upload, upload route, document service, session, UI, and utilities.
+- **Phase 2 Extraction & Viewer (103 tests across 6 suites):** `extraction-service.test.ts`, `extraction-persistence.test.ts`, `chunking-service.test.ts`, `chunk-persistence-service.test.ts`, `document-workspace-service.test.ts`, `document-workspace-ui.test.tsx`.
+- **Phase 3 Intelligence & Workspace (225 tests across 11 suites):** `intelligence-schemas.test.ts`, `openai-client.test.ts`, `document-classification.test.ts`, `structured-extraction.test.ts`, `document-findings.test.ts`, `expectation-catalog.test.ts`, `evidence-validator.test.ts`, `intelligence-service.test.ts`, `intelligence-persistence.test.ts`, `intelligence-workspace.test.tsx`, `phase3-final-verification.test.tsx`.
+
+### Phase 1 Detail:
 - `tests/unit/document-validation.test.ts` (34 tests):
   - Magic byte verification: PDF (`%PDF-`), DOCX (ZIP `PK\x03\x04` and OOXML `[Content_Types].xml`).
   - Size boundary validation: ≤ 10 MB accepted, > 10 MB rejected.
@@ -132,7 +137,7 @@ Treated as a first-class test category:
 | Unauthenticated upload rejection (401) | Unit | Phase 1 | ✅ Tested |
 | Session-derived ownership (no client ID) | Unit | Phase 1 | ✅ Tested |
 | Stack trace not exposed in upload error | Unit | Phase 1 | ✅ Tested |
-| Prompt injection in document content | Integration (mock AI) | Phase 3 | 🔜 Planned |
+| Prompt injection in document content | Unit & Integration | Phase 3 | ✅ Tested |
 | Zod validation rejection on bad API input | Unit | Phase 0 | ✅ Tested |
 | Missing required fields in API body | Unit | Phase 0 | ✅ Tested |
 | Stack trace not exposed in error response | Integration | Phase 0 | ✅ Tested |

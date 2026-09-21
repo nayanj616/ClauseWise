@@ -280,77 +280,118 @@ Return 201 Response with Processed Document
 
 ---
 
-## Phase 3 — Document Intelligence Contract & Infrastructure (✅ Complete)
+## Phase 3 — Document Intelligence Contract & Infrastructure (✅ CLOSED)
 
 **Goal:** Establish and implement the technical contract for AI-powered document
 intelligence, strictly enforcing that the LLM is never the source of truth,
 and ensuring all substantive findings and metadata have verifiable evidence
 rooted in persisted Phase 2 sections.
 
-### Intelligence Pipeline:
+### Status: PHASE 3 CLOSED
+```text
+3.0 Intelligence Contract       ✓ CLOSED
+3.1 AI Infrastructure           ✓ CLOSED
+3.2 Document Classification     ✓ CLOSED
+3.3 Structured Extraction       ✓ CLOSED
+3.4 Findings                    ✓ CLOSED
+3.5 Evidence Validation         ✓ CLOSED
+3.6 Intelligence Workspace      ✓ CLOSED
+3.7 Final Verification          ✓ CLOSED
+
+PHASE 3 CLOSED
 ```
-Persisted document sections
-  ↓
-Deterministic input bounding (max 240,000 chars, no silent loss)
-  ↓
-LLM inference (OpenAI gpt-4o Structured Outputs with security prompt wrapper)
-  ↓
-Discriminated schema validation (Zod)
-  ↓
-Deterministic evidence validation (verifies source text in section; matches chunk & page)
-  ↓
-Idempotent persistence (atomic transaction; deletes prior findings for document)
+
+### Completed Evidence-First Architecture:
+```text
+Persisted Sections
+    ↓
+Deterministic Chunks
+    ↓
+Bounded Intelligence Input (max 240,000 chars, no silent loss)
+    ↓
+LLM Structured Output (OpenAI gpt-4o Structured Outputs + security wrapper)
+    ↓
+Zod Schema Validation (discriminated unions, no risk scores)
+    ↓
+Deterministic Evidence Validation (verifies source text in section; matches chunk & page)
+    ↓
+Atomic Persistence (transactional commit, reprocessing idempotency)
+    ↓
+Grounded Intelligence Workspace (presentation & navigation over persisted data)
 ```
 
-### Deliverables (Implemented & Verified):
+The LLM is **never the source of truth**. Authoritative evidence and provenance come exclusively from persisted document records.
 
-**Database & Migration**
-- `document_findings` schema in `lib/db/schema.ts` (`id`, `document_id`, `section_id`, `chunk_id`, `finding_type`, `importance`, `label`, `summary`, `source_text`, `page_number`, `metadata`, `created_at`, `updated_at`)
-- `document` schema extended with `document_type`, `parties`, and `metadata` (with `governing_law` and `jurisdiction`)
-- Foreign keys with `onDelete: cascade` (and `onDelete: set null` for chunk reference)
-- Performance indexes on `document_id`, `finding_type`, and `importance`
-- Drizzle migration generated and applied (`0004_flawless_maximus.sql`)
-- Database naming strictly resolved: Drizzle `documents` → SQL `"document"`, `documentFindings` → SQL `"document_findings"`
+### Slices Implemented & Closed:
 
-**Domain Core & Validation**
-- `lib/intelligence/expectation-catalog.ts`:
-  - Authoritative core provision catalog for major document types (`nda`, `employment_agreement`, `lease_agreement`, `service_agreement`, `commercial_contract`, `general`)
-  - Prevents the model from inventing arbitrary checklists for `missing_information`
-- `lib/intelligence/schemas.ts`:
-  - Discriminated union on `findingType`: substantive findings strictly require non-empty `sourceText` and `sectionOrderIndex`; `missing_information` allows null `sourceText` and requires `expectedTopic` and `ruleBasis`
-  - Evidenced metadata schemas for `parties`, `governingLaw`, `jurisdiction`, `importantSections`, and `classification`
-  - Strict absence of numerical risk scores (`.strict()`)
-- `lib/intelligence/prompts.ts`:
-  - Untrusted document content wrapper (`=== UNTRUSTED DOCUMENT CONTENT ===`)
-  - Anti-injection directive and non-lawyer assistant role definition
-  - Deterministic input bounding: caps context at 240,000 chars without dropping preambles or closings, recording bounding telemetry
-- `lib/intelligence/evidence-validator.ts`:
-  - Deterministic grounding engine verifying exact/whitespace-normalized excerpts against persisted section text
-  - Resolves matching `chunk_id` and propagates `pageNumber` from persisted records
-  - Extends validation beyond findings to all factual metadata (`parties`, `governingLaw`, `jurisdiction`, `importantSections`, `documentType`)
-  - Enforces material failure guard vs dropped candidate distinction
+#### Slice 3.0 — Intelligence Contract (✅ Closed)
+- Established the boundary between persisted document data and AI intelligence.
+- Discriminated union schemas (`lib/intelligence/schemas.ts`) enforcing `sourceText` and `sectionOrderIndex` for substantive findings, and strictly absence-based representation for `missing_information`.
+- Pure expectation catalog (`lib/intelligence/expectation-catalog.ts`) grounding missing provisions in `CORE_PROVISION_CATALOG` to prevent arbitrary checklist invention.
+- Strict absence of numerical legal risk scores (`.strict()` Zod schemas).
 
-**Domain Services**
-- `lib/services/intelligence-service.ts`:
-  - Pure domain orchestrator: fetches sections, bounds context, invokes OpenAI Structured Outputs, validates schema, validates evidence, enforces failure guards
-- `lib/services/intelligence-persistence-service.ts`:
-  - `persistDocumentIntelligence()`: atomic transactional persistence with reprocessing idempotency
-  - `processDocumentIntelligence()`: orchestrates analysis and persistence, setting status `analyzing` → `ready` (or `error` on failure without corrupting Phase 2 data)
+#### Slice 3.1 — AI Infrastructure (✅ Closed)
+- Server-side OpenAI integration boundary (`lib/ai/openai-client.ts`) with zero document business logic.
+- Structured output generation with automated error wrapping (`OpenAiInferenceError`, timeouts, rate limits, refusals).
+- Security prompt formatting (`lib/intelligence/prompts.ts`) wrapping sections in `=== UNTRUSTED DOCUMENT CONTENT ===` delimiters with anti-injection instructions.
+- Deterministic input bounding capping context at 240,000 characters while preserving preambles and closings.
 
-**Tests & Quality**
-- 222 total automated tests passing across 18 test suites in Vitest:
-  - `tests/unit/expectation-catalog.test.ts` (catalog lookup, normalization, rejection of invented topics)
-  - `tests/unit/intelligence-schemas.test.ts` (discriminated union, required sourceText, rejection of risk scores)
-  - `tests/unit/evidence-validator.test.ts` (grounding checks, chunk mapping, metadata validation, candidate drops)
-  - `tests/unit/intelligence-service.test.ts` (OpenAI mock, refusal handling, bounding, material failure guard)
-  - `tests/unit/intelligence-persistence.test.ts` (atomic commit, reprocessing idempotency, failure safety)
-- TypeScript: 0 errors (`npx tsc --noEmit`)
-- Next.js Production Build: passed (`next build`)
+#### Slice 3.2 — Document Classification (✅ Closed)
+- Grounded document type classification (`classifyDocument`).
+- Explicit distinction between text-stated classifications (with verified section citation) and inferred classifications (with non-empty `inferenceReason` and null citations).
 
+#### Slice 3.3 — Structured Extraction (✅ Closed)
+- Evidence-backed extraction of parties, governing law, jurisdiction, key dates, and financial terms (`extractDocumentMetadata`).
+- Verbatim grounding requirement for all extracted entities.
+
+#### Slice 3.4 — Findings (✅ Closed)
+- Extraction of obligations, key terms, attention items, ambiguities, inconsistencies, and missing provisions (`generateDocumentFindings`).
+- Bounded to 30 findings per document; review priority separated into `needs_attention`, `important`, and `informational`.
+
+#### Slice 3.5 — Evidence Validation (✅ Closed)
+- Pure domain engine (`lib/intelligence/evidence-validator.ts`) with zero network, DB, or OpenAI dependencies.
+- Standardized core primitive `verifySectionExcerptEvidence` using exact and whitespace-normalized substring matching.
+- Authoritative resolution of `sectionId`, `chunkId`, and `pageNumber` from persisted records; model-supplied UUIDs are disregarded.
+- Cross-document isolation: sections or chunks with mismatched `documentId` are deterministically rejected.
+
+#### Slice 3.6 — Intelligence Workspace (✅ Closed)
+- Comprehensive user-facing presentation and navigation layer (`components/workspace/`):
+  - `DocumentHeader`: Document metadata, status badge, classification badge (with stated vs inferred indicators), and tab navigation (`Intelligence & Findings` vs `Document Text`).
+  - `DocumentOverview`: Structured cards for Parties, Governing Law & Jurisdiction, Key Dates, Financial Terms, and Executive Summary.
+  - `ImportantSections`: Highlighted key sections with plain-English rationales and jump-to-section navigation triggers.
+  - `FindingCard`: Accessible finding cards (`aria-pressed`) displaying labels, plain-English summaries, canonical type badges, and review priority badges.
+  - `EvidencePanel`: Master-detail inspector displaying verbatim source excerpts with verified coordinates and "View in Document Text" action; renders absence explanations with zero fake citations for `missing_information`.
+  - `FindingList`: Deterministic filtering by priority (`All`, `Needs Attention`, `Important`, `Informational`) and finding types.
+  - `DocumentViewer`: Synchronized section viewer supporting bi-directional navigation from findings and important sections.
+  - `DocumentWorkspace`: Top-level coordinator managing tabs, active finding selection, and cross-tab navigation.
+- **Workspace Invariants:**
+  - Executive Summary is display-only: rendered strictly when already present in persisted `metadata.executiveSummary`, never synthesized to fill gaps.
+  - Canonical `DOCUMENT_STATUS` state machine governs all views (`queued`, `extracting`, `chunking`, `analyzing`, `ready`, `error`). No duplicate UI state machine.
+  - Presentation only: zero LLM calls, embeddings, or vector queries in workspace UI or client components.
+
+#### Slice 3.7 — Final Verification (✅ Closed)
+- Dedicated cross-slice regression test suite (`tests/unit/phase3-final-verification.test.tsx`) covering 7 substantive verification groups:
+  1. Cross-slice pipeline flow & evidence enforcement
+  2. Evidence integrity & absence invariants
+  3. Failure isolation & Phase 2 data immutability
+  4. Multi-document & cross-tenant isolation
+  5. Prompt & data security
+  6. Persistence & reprocessing correctness
+  7. Workspace regressions & absence of legal risk scores
+
+### Phase 3 Final Verification Status:
+```text
+- 24 test files passing
+- 413 tests passing (100% green)
+- TypeScript strict check: 0 errors (npx tsc --noEmit)
+- ESLint: 0 warnings/errors (pnpm lint)
+- Next.js Production Build: PASS (pnpm build)
+- Repository cleanliness & size: PASS (~700 KiB, well under 10 MB limit)
+```
 
 ---
 
-## Phase 4 — Evidence-backed Analysis Display
+## Phase 4 — Evidence-backed Analysis Display (🔜 Next Boundary)
 
 **Goal:** Findings are linked to source document sections. Clicking a finding
 highlights and scrolls to the source in the document viewer.

@@ -52,19 +52,25 @@ embeddings, and **Supabase Storage** for file storage.
 ┌──────────────────▼───────────────────────┐
 │          Domain / Service Layer          │
 │  lib/services/                           │
-│  document-service.ts                     │
-│  analysis-service.ts                     │
-│  retrieval-service.ts                    │
-│  comparison-service.ts                   │
-│  action-service.ts                       │
-│  preparation-service.ts                  │
+│  ├── document-service.ts                 │
+│  ├── extraction-persistence-service.ts   │
+│  ├── chunk-persistence-service.ts        │
+│  ├── chunking-service.ts                 │
+│  ├── intelligence-service.ts             │
+│  └── intelligence-persistence-service.ts │
+│                                          │
+│  lib/intelligence/ (Domain Core & Rules) │
+│  ├── evidence-validator.ts               │
+│  ├── expectation-catalog.ts              │
+│  ├── schemas.ts                          │
+│  └── prompts.ts                          │
 └──────────────────┬───────────────────────┘
                    │
 ┌──────────────────▼───────────────────────┐
 │        Infrastructure Layer              │
 │  lib/db/         — Drizzle + PostgreSQL  │
 │  lib/storage/    — Supabase Storage      │
-│  lib/ai/         — OpenAI chat client    │
+│  lib/ai/         — OpenAI client adapter │
 │  lib/embeddings/ — OpenAI embeddings     │
 │  lib/vector/     — pgvector queries      │
 └──────────────────────────────────────────┘
@@ -157,32 +163,33 @@ Create Document record (status: queued)
   ↓
 Return 201 to client ◄── upload request ends here
 
-[Out-of-band: processDocument(documentId)]
+[Processing Pipeline: Extraction & Intelligence]
   ↓
 status: extracting
-  ↓
-Text extraction (pdf-parse for PDF, mammoth for DOCX)
-  ↓
-Section detection (heuristic: headings, numbered clauses)
+  ├─ Text extraction (unpdf for PDF, mammoth for DOCX, UTF-8 text)
+  └─ Section detection (heuristic headings & numbered clauses)
   ↓
 status: chunking
+  ├─ Chunking (section-aware, boundary-preserving, token estimation)
+  └─ Atomic persistence: document_sections + document_chunks
   ↓
-Chunking (section-aware, max ~500 tokens with overlap)
+status: analyzing (Phase 3 Intelligence Pipeline)
+  ├─ Bounded input context (max 240,000 chars)
+  ├─ OpenAI gpt-4o Structured Outputs with anti-injection wrapper
+  ├─ Discriminated Zod schema validation (zero numerical risk scores)
+  ├─ Deterministic Evidence Validation (exact/whitespace-normalized containment)
+  ├─ Authoritative ID resolution from DB (model-supplied IDs rejected)
+  └─ Atomic Persistence: document_findings + metadata update (idempotent replacement)
   ↓
-Embedding each chunk (text-embedding-3-small)
-  ↓
-Store chunks + vectors in pgvector
-  ↓
-status: analyzing
-  ↓
-Document classification (type, parties, governing law/jurisdiction)
-  ↓
-AI Analysis pass (structured findings extraction)
-  ↓
-Store DocumentFinding / Obligation / ImportantDate records
-  ↓
-status: ready ◄── UI stops polling, renders findings
-```
+status: ready ◄── UI renders Grounded Intelligence Workspace
+
+### Evidence-First Intelligence Invariant
+The LLM is an inference mechanism, **never the source of truth**.
+Every substantive finding and metadata item is grounded in persisted document evidence.
+Model-generated UUIDs are disregarded; section and chunk IDs are resolved strictly
+from database records. Missing provisions are strictly absence-based and grounded in the
+Core Provision Catalog with zero fabricated citations. Phase 2 sections and chunks
+remain completely immutable during intelligence processing.
 
 **Error handling:** Any failure in the pipeline sets `status: error` and
 records an `error_message`. The UI surfaces a human-readable error and a

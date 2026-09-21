@@ -73,7 +73,7 @@ Represents an uploaded legal document.
 | `created_at` | timestamp | |
 | `updated_at` | timestamp | |
 
-*Implementation status (Phase 1 & Phase 2 Slice 2.2): `id`, `user_id`, `title`, `original_filename`, `storage_path`, `mime_type`, `file_size_bytes`, `page_count`, `status` (initial value: `queued`), `error_message`, `governing_law`, `jurisdiction`, `created_at`, and `updated_at` are implemented in Drizzle ORM (`lib/db/schema.ts`). Downstream extraction columns (`document_type`, `parties`, `metadata`) are introduced in subsequent slices/phases.*
+*Implementation status (Phase 1, 2, & 3): `id`, `user_id`, `title`, `original_filename`, `storage_path`, `mime_type`, `file_size_bytes`, `page_count`, `status` (initial value: `queued`), `error_message`, `document_type`, `parties`, `governing_law`, `jurisdiction`, `metadata`, `created_at`, and `updated_at` are implemented in Drizzle ORM (`lib/db/schema.ts`) and fully migrated (`0004_flawless_maximus.sql`).*
 
 ---
 
@@ -115,40 +115,41 @@ A vector-searchable chunk of text derived from a section.
 
 ### DocumentFinding
 The central intelligence unit. Represents a single AI-identified finding
-within a document.
+within a document. Implemented in PostgreSQL via Drizzle ORM table `document_findings` (Phase 3).
 
 | Field | Type | Notes |
 |---|---|---|
 | `id` | UUID | Primary key |
-| `document_id` | UUID | FK → Document |
-| `section_id` | UUID | FK → DocumentSection (nullable) |
-| `chunk_id` | UUID | FK → DocumentChunk (nullable) — for RAG traceability |
+| `document_id` | UUID | FK → Document (`onDelete: cascade`) |
+| `section_id` | UUID | FK → DocumentSection (nullable, `onDelete: cascade`) |
+| `chunk_id` | UUID | FK → DocumentChunk (nullable, `onDelete: set null`) — for RAG traceability |
 | `finding_type` | enum | See taxonomy below |
 | `label` | string | Short human-readable label |
 | `summary` | text | Plain-English explanation |
-| `source_text` | text | Verbatim excerpt from document (evidence) |
-| `page_number` | integer | Source page |
+| `source_text` | text | Verbatim excerpt from document (evidence; null for `missing_information`) |
+| `page_number` | integer | Source page (propagated from section or chunk) |
 | `importance` | enum | `needs_attention`, `important`, `informational` |
-| `metadata` | jsonb | Type-specific data (e.g. date value, amount) |
+| `metadata` | jsonb | Type-specific data (e.g. expectedTopic, ruleBasis) |
 | `created_at` | timestamp | |
+| `updated_at` | timestamp | |
 
 **Finding type taxonomy:**
 
 > **Design rule:** `finding_type` describes the *category* of the finding.
 > The `importance` column (`needs_attention` / `important` / `informational`)
 > describes *how urgently* the user should review it. Do not conflate the two.
+> Numerical legal risk scores are strictly forbidden.
 
 | Value | Description |
 |---|---|
 | `key_term` | Important defined term, party reference, or defined concept |
-| `clause` | A substantive clause worth surfacing (e.g. termination, indemnity, IP assignment) |
+| `attention` | A clause or matter requiring explicit human review |
 | `obligation` | An explicit obligation — something a party is required to do or not do |
 | `ambiguity` | Language that is unclear or open to more than one interpretation |
 | `date` | Important date or deadline with a value or formula stated in the document |
 | `financial_term` | Fee, penalty, payment, salary, or monetary value stated in the document |
 | `inconsistency` | Apparent conflict between two provisions, supported by evidence from both |
-| `missing_provision` | An expected provision is clearly absent, inferred from the document type and surrounding context — AI must cite the basis for expecting it |
-| `not_identified` | The AI could not locate information on a topic; used to surface gaps without asserting the document is deficient |
+| `missing_information` | An expected core provision is absent given the document type and grounded in the Core Provision Catalog (carries null `source_text` and null `section_id`) |
 
 ---
 

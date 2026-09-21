@@ -94,13 +94,13 @@ Infrastructure (lib/db, lib/storage, lib/ai, lib/embeddings)
 4. State explicitly when the document does not contain enough information.
 5. Never produce numerical legal risk scores.
 6. `finding_type` describes the category of a finding; `importance` describes
-   the review priority. Keep them separate. Valid `finding_type` values:
-   `key_term`, `clause`, `obligation`, `ambiguity`, `date`, `financial_term`,
-   `inconsistency`, `missing_provision`, `not_identified`.
+   the review priority. Keep them separate. Canonical `finding_type` values:
+   `key_term`, `attention`, `obligation`, `ambiguity`, `date`, `financial_term`,
+   `inconsistency`, `missing_information`.
    Valid `importance` values: `needs_attention`, `important`, `informational`.
-   Use `missing_provision` only when absence is clearly supported by the
-   document type and context. Use `not_identified` when the AI simply could
-   not find relevant text.
+   Use `missing_information` only when absence of a standard provision is clearly
+   supported by the document type and grounded in the Core Provision Catalog.
+   Never fabricate excerpts or citations for absent provisions.
 7. Never present ClauseWise as a lawyer, legal advisor, or legal representative.
 
 ---
