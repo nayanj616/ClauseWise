@@ -24,10 +24,20 @@ import type {
   ValidatedJurisdiction,
   ValidatedImportantSection,
   ValidatedClassification,
+  ValidatedDate,
+  ValidatedFinancialTerm,
+  ValidatedStructuredExtraction,
 } from "./types";
 import {
   type RawAiIntelligenceResponse,
   type RawAiClassification,
+  type RawAiParty,
+  type RawAiGoverningLaw,
+  type RawAiJurisdiction,
+  type RawAiImportantSection,
+  type RawAiDate,
+  type RawAiFinancialTerm,
+  type RawAiStructuredExtraction,
   SUPPORTED_DOCUMENT_TYPES,
   type SupportedDocumentType,
 } from "./schemas";
@@ -40,6 +50,13 @@ export class ClassificationEvidenceValidationError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "ClassificationEvidenceValidationError";
+  }
+}
+
+export class StructuredExtractionValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "StructuredExtractionValidationError";
   }
 }
 
@@ -425,5 +442,250 @@ export function validateClassificationEvidence(
       `Classified as ${resolvedType} based on document content and structure.`,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Slice 3.3 — Structured Extraction Evidence Validation
+// ---------------------------------------------------------------------------
+
+export interface ValidateStructuredExtractionOptions {
+  strict?: boolean;
+}
+
+/**
+ * Validates a single party against document sections.
+ * Returns ValidatedParty if valid, or null if invalid.
+ */
+export function validatePartyEvidence(
+  party: RawAiParty,
+  sectionsByOrder: Map<number, IntelligenceInputSection>
+): ValidatedParty | null {
+  const targetSec = sectionsByOrder.get(party.sectionOrderIndex);
+  if (!targetSec) return null;
+  if (!isExcerptInContent(targetSec.content, party.sourceText)) return null;
+
+  return {
+    name: party.name.trim(),
+    role: party.role?.trim() || null,
+    sourceText: party.sourceText.trim(),
+    sectionId: targetSec.id,
+    sectionOrderIndex: targetSec.orderIndex,
+  };
+}
+
+/**
+ * Validates a governing law provision against document sections.
+ * Returns ValidatedGoverningLaw if valid, or null if invalid.
+ */
+export function validateGoverningLawEvidence(
+  law: RawAiGoverningLaw,
+  sectionsByOrder: Map<number, IntelligenceInputSection>
+): ValidatedGoverningLaw | null {
+  const targetSec = sectionsByOrder.get(law.sectionOrderIndex);
+  if (!targetSec) return null;
+  if (!isExcerptInContent(targetSec.content, law.sourceText)) return null;
+
+  return {
+    law: law.law.trim(),
+    sourceText: law.sourceText.trim(),
+    sectionId: targetSec.id,
+    sectionOrderIndex: targetSec.orderIndex,
+  };
+}
+
+/**
+ * Validates a jurisdiction provision against document sections.
+ * Returns ValidatedJurisdiction if valid, or null if invalid.
+ */
+export function validateJurisdictionEvidence(
+  jurisdiction: RawAiJurisdiction,
+  sectionsByOrder: Map<number, IntelligenceInputSection>
+): ValidatedJurisdiction | null {
+  const targetSec = sectionsByOrder.get(jurisdiction.sectionOrderIndex);
+  if (!targetSec) return null;
+  if (!isExcerptInContent(targetSec.content, jurisdiction.sourceText)) return null;
+
+  return {
+    jurisdiction: jurisdiction.jurisdiction.trim(),
+    sourceText: jurisdiction.sourceText.trim(),
+    sectionId: targetSec.id,
+    sectionOrderIndex: targetSec.orderIndex,
+  };
+}
+
+/**
+ * Validates an important date against document sections.
+ * Returns ValidatedDate if valid, or null if invalid.
+ */
+export function validateDateEvidence(
+  date: RawAiDate,
+  sectionsByOrder: Map<number, IntelligenceInputSection>
+): ValidatedDate | null {
+  const targetSec = sectionsByOrder.get(date.sectionOrderIndex);
+  if (!targetSec) return null;
+  if (!isExcerptInContent(targetSec.content, date.sourceText)) return null;
+
+  return {
+    dateValue: date.dateValue.trim(),
+    dateType: date.dateType.trim(),
+    description: date.description.trim(),
+    sourceText: date.sourceText.trim(),
+    sectionId: targetSec.id,
+    sectionOrderIndex: targetSec.orderIndex,
+  };
+}
+
+/**
+ * Validates a financial term against document sections.
+ * Returns ValidatedFinancialTerm if valid, or null if invalid.
+ */
+export function validateFinancialTermEvidence(
+  term: RawAiFinancialTerm,
+  sectionsByOrder: Map<number, IntelligenceInputSection>
+): ValidatedFinancialTerm | null {
+  const targetSec = sectionsByOrder.get(term.sectionOrderIndex);
+  if (!targetSec) return null;
+  if (!isExcerptInContent(targetSec.content, term.sourceText)) return null;
+
+  return {
+    amount: term.amount.trim(),
+    currency: term.currency?.trim() || null,
+    frequency: term.frequency?.trim() || null,
+    description: term.description.trim(),
+    sourceText: term.sourceText.trim(),
+    sectionId: targetSec.id,
+    sectionOrderIndex: targetSec.orderIndex,
+  };
+}
+
+/**
+ * Validates an important section against document sections.
+ * Returns ValidatedImportantSection if valid, or null if invalid.
+ */
+export function validateImportantSectionEvidence(
+  sec: RawAiImportantSection,
+  sectionsByOrder: Map<number, IntelligenceInputSection>
+): ValidatedImportantSection | null {
+  const targetSec = sectionsByOrder.get(sec.sectionOrderIndex);
+  if (!targetSec) return null;
+
+  return {
+    sectionId: targetSec.id,
+    sectionOrderIndex: targetSec.orderIndex,
+    title: sec.title.trim(),
+    reason: sec.reason.trim(),
+  };
+}
+
+/**
+ * Deterministically validates all structured extraction fields against persisted document sections (Slice 3.3).
+ *
+ * For each item:
+ * 1. Referenced section must exist.
+ * 2. Source text must occur in the referenced section (exact or whitespace-normalized).
+ * 3. Invalid or fabricated items are filtered out (or rejected with an error if strict mode is requested).
+ *
+ * @param raw - Unverified AI structured extraction payload
+ * @param sections - Persisted document sections
+ * @param options - Validation options (e.g. strict)
+ * @returns Grounded and validated structured extraction result
+ */
+export function validateStructuredExtractionEvidence(
+  raw: RawAiStructuredExtraction,
+  sections: IntelligenceInputSection[],
+  options?: ValidateStructuredExtractionOptions
+): ValidatedStructuredExtraction {
+  const sectionsByOrder = new Map<number, IntelligenceInputSection>();
+  for (const sec of sections) {
+    sectionsByOrder.set(sec.orderIndex, sec);
+  }
+
+  // 1. Validate Parties
+  const validatedParties: ValidatedParty[] = [];
+  for (const p of raw.parties) {
+    const validated = validatePartyEvidence(p, sectionsByOrder);
+    if (validated) {
+      validatedParties.push(validated);
+    } else if (options?.strict) {
+      throw new StructuredExtractionValidationError(
+        `Party "${p.name}" failed evidence validation in section ${p.sectionOrderIndex}.`
+      );
+    }
+  }
+
+  // 2. Validate Governing Law
+  let validatedGoverningLaw: ValidatedGoverningLaw | null = null;
+  if (raw.governingLaw) {
+    const validated = validateGoverningLawEvidence(raw.governingLaw, sectionsByOrder);
+    if (validated) {
+      validatedGoverningLaw = validated;
+    } else if (options?.strict) {
+      throw new StructuredExtractionValidationError(
+        `Governing law "${raw.governingLaw.law}" failed evidence validation in section ${raw.governingLaw.sectionOrderIndex}.`
+      );
+    }
+  }
+
+  // 3. Validate Jurisdiction
+  let validatedJurisdiction: ValidatedJurisdiction | null = null;
+  if (raw.jurisdiction) {
+    const validated = validateJurisdictionEvidence(raw.jurisdiction, sectionsByOrder);
+    if (validated) {
+      validatedJurisdiction = validated;
+    } else if (options?.strict) {
+      throw new StructuredExtractionValidationError(
+        `Jurisdiction "${raw.jurisdiction.jurisdiction}" failed evidence validation in section ${raw.jurisdiction.sectionOrderIndex}.`
+      );
+    }
+  }
+
+  // 4. Validate Important Dates
+  const validatedDates: ValidatedDate[] = [];
+  for (const d of raw.importantDates) {
+    const validated = validateDateEvidence(d, sectionsByOrder);
+    if (validated) {
+      validatedDates.push(validated);
+    } else if (options?.strict) {
+      throw new StructuredExtractionValidationError(
+        `Date "${d.dateValue}" (${d.dateType}) failed evidence validation in section ${d.sectionOrderIndex}.`
+      );
+    }
+  }
+
+  // 5. Validate Financial Terms
+  const validatedFinancialTerms: ValidatedFinancialTerm[] = [];
+  for (const f of raw.financialTerms) {
+    const validated = validateFinancialTermEvidence(f, sectionsByOrder);
+    if (validated) {
+      validatedFinancialTerms.push(validated);
+    } else if (options?.strict) {
+      throw new StructuredExtractionValidationError(
+        `Financial term "${f.amount}" failed evidence validation in section ${f.sectionOrderIndex}.`
+      );
+    }
+  }
+
+  // 6. Validate Important Sections
+  const validatedImportantSections: ValidatedImportantSection[] = [];
+  for (const s of raw.importantSections) {
+    const validated = validateImportantSectionEvidence(s, sectionsByOrder);
+    if (validated) {
+      validatedImportantSections.push(validated);
+    } else if (options?.strict) {
+      throw new StructuredExtractionValidationError(
+        `Important section with index ${s.sectionOrderIndex} does not exist in persisted sections.`
+      );
+    }
+  }
+
+  return {
+    parties: validatedParties,
+    governingLaw: validatedGoverningLaw,
+    jurisdiction: validatedJurisdiction,
+    importantDates: validatedDates,
+    financialTerms: validatedFinancialTerms,
+    importantSections: validatedImportantSections,
+  };
+}
+
 
 

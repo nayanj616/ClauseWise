@@ -153,6 +153,47 @@ export const RawAiImportantSectionSchema = z
   .strict();
 
 /**
+ * Important date extracted from document text with verifiable source evidence (Slice 3.3).
+ */
+export const RawAiDateSchema = z
+  .object({
+    dateValue: z.string().min(1).max(100),
+    dateType: z.string().min(1).max(100),
+    description: z.string().min(1).max(500),
+    sourceText: z.string().min(1, "Supporting source text required for date"),
+    sectionOrderIndex: z.number().int().nonnegative(),
+  })
+  .strict();
+
+/**
+ * Financial term extracted from document text with verifiable source evidence (Slice 3.3).
+ */
+export const RawAiFinancialTermSchema = z
+  .object({
+    amount: z.string().min(1).max(100),
+    currency: z.string().max(20).nullable(),
+    frequency: z.string().max(50).nullable(),
+    description: z.string().min(1).max(500),
+    sourceText: z.string().min(1, "Supporting source text required for financial term"),
+    sectionOrderIndex: z.number().int().nonnegative(),
+  })
+  .strict();
+
+/**
+ * Complete Structured Extraction Schema (Slice 3.3).
+ */
+export const RawAiStructuredExtractionSchema = z
+  .object({
+    parties: z.array(RawAiPartySchema),
+    governingLaw: RawAiGoverningLawSchema.nullable(),
+    jurisdiction: RawAiJurisdictionSchema.nullable(),
+    importantDates: z.array(RawAiDateSchema),
+    financialTerms: z.array(RawAiFinancialTermSchema),
+    importantSections: z.array(RawAiImportantSectionSchema),
+  })
+  .strict();
+
+/**
  * Supported document categories established by the Phase 3 contract.
  */
 export const SUPPORTED_DOCUMENT_TYPES = [
@@ -218,3 +259,6 @@ export type RawAiGoverningLaw = z.infer<typeof RawAiGoverningLawSchema>;
 export type RawAiJurisdiction = z.infer<typeof RawAiJurisdictionSchema>;
 export type RawAiImportantSection = z.infer<typeof RawAiImportantSectionSchema>;
 export type RawAiClassification = z.infer<typeof RawAiClassificationSchema>;
+export type RawAiDate = z.infer<typeof RawAiDateSchema>;
+export type RawAiFinancialTerm = z.infer<typeof RawAiFinancialTermSchema>;
+export type RawAiStructuredExtraction = z.infer<typeof RawAiStructuredExtractionSchema>;

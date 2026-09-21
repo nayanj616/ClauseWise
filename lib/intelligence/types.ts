@@ -17,6 +17,9 @@ import type {
   RawAiJurisdiction,
   RawAiImportantSection,
   RawAiClassification,
+  RawAiDate,
+  RawAiFinancialTerm,
+  RawAiStructuredExtraction,
 } from "./schemas";
 
 export type {
@@ -31,6 +34,9 @@ export type {
   RawAiJurisdiction,
   RawAiImportantSection,
   RawAiClassification,
+  RawAiDate,
+  RawAiFinancialTerm,
+  RawAiStructuredExtraction,
 };
 
 /** Minimal persisted section representation supplied as intelligence input */
@@ -140,4 +146,36 @@ export interface ValidatedIntelligenceResult {
   rejectedFindingsCount: number;
   inputBounding?: InputBoundingMetadata;
 }
+
+/** Verified important date with grounded evidence (Slice 3.3) */
+export interface ValidatedDate {
+  dateValue: string;
+  dateType: string;
+  description: string;
+  sourceText: string;
+  sectionId: string;
+  sectionOrderIndex: number;
+}
+
+/** Verified financial term with grounded evidence (Slice 3.3) */
+export interface ValidatedFinancialTerm {
+  amount: string;
+  currency: string | null;
+  frequency: string | null;
+  description: string;
+  sourceText: string;
+  sectionId: string;
+  sectionOrderIndex: number;
+}
+
+/** Complete verified structured extraction result (Slice 3.3) */
+export interface ValidatedStructuredExtraction {
+  parties: ValidatedParty[];
+  governingLaw: ValidatedGoverningLaw | null;
+  jurisdiction: ValidatedJurisdiction | null;
+  importantDates: ValidatedDate[];
+  financialTerms: ValidatedFinancialTerm[];
+  importantSections: ValidatedImportantSection[];
+}
+
 

@@ -29,19 +29,26 @@ import {
 import {
   RawAiIntelligenceResponseSchema,
   RawAiClassificationSchema,
+  RawAiStructuredExtractionSchema,
   type RawAiClassification,
+  type RawAiStructuredExtraction,
 } from "@/lib/intelligence/schemas";
 import {
   buildIntelligenceSystemPrompt,
   buildIntelligenceUserPrompt,
   buildClassificationSystemPrompt,
   buildClassificationUserPrompt,
+  buildExtractionSystemPrompt,
+  buildExtractionUserPrompt,
   formatSectionsForIntelligence,
 } from "@/lib/intelligence/prompts";
 import {
   validateIntelligenceEvidence,
   validateClassificationEvidence,
+  validateStructuredExtractionEvidence,
   ClassificationEvidenceValidationError,
+  StructuredExtractionValidationError,
+  type ValidateStructuredExtractionOptions,
   isSupportedDocumentType,
 } from "@/lib/intelligence/evidence-validator";
 import type {
@@ -49,6 +56,7 @@ import type {
   IntelligenceInputSection,
   ValidatedIntelligenceResult,
   ValidatedClassification,
+  ValidatedStructuredExtraction,
 } from "@/lib/intelligence/types";
 
 const UUID_REGEX =
@@ -447,5 +455,224 @@ export async function classifyAndPersistDocument(
 
   return { document: updatedDoc, classification };
 }
+
+// ---------------------------------------------------------------------------
+// Slice 3.3 — Structured Extraction Pipeline
+// ---------------------------------------------------------------------------
+
+/**
+ * Extracts structured metadata from persisted sections using grounded LLM inference (Slice 3.3).
+ *
+ * Pipeline:
+ * Persisted Sections -> Input Bounding -> OpenAI Structured Output -> Zod Validation -> Evidence Validation
+ *
+ * @param sections - Persisted document sections
+ * @param metadata - Document metadata (filename, page count)
+ * @param options - Validation options (e.g. strict)
+ * @returns Grounded and validated structured extraction result
+ */
+export async function extractDocumentContent(
+  sections: IntelligenceInputSection[],
+  metadata: { filename: string; pageCount: number | null },
+  options?: ValidateStructuredExtractionOptions
+): Promise<ValidatedStructuredExtraction> {
+  if (!sections || sections.length === 0) {
+    throw new IntelligenceValidationError(
+      "Cannot extract document metadata: no extracted sections provided."
+    );
+  }
+
+  const { formattedText } = formatSectionsForIntelligence(sections);
+  const systemPrompt = buildExtractionSystemPrompt();
+  const userPrompt = buildExtractionUserPrompt(formattedText, metadata);
+
+  let rawExtraction: RawAiStructuredExtraction;
+  try {
+    rawExtraction = await generateStructuredOutput<RawAiStructuredExtraction>({
+      model: MODELS.CHAT,
+      temperature: TEMPERATURES.ANALYSIS,
+      maxTokens: 2048,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+      schema: RawAiStructuredExtractionSchema,
+      name: "document_structured_extraction",
+    });
+  } catch (error) {
+    if (error instanceof OpenAiInferenceError) {
+      throw error;
+    }
+    throw new OpenAiInferenceError(
+      `OpenAI structured extraction inference failed: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error }
+    );
+  }
+
+  try {
+    return validateStructuredExtractionEvidence(rawExtraction, sections, options);
+  } catch (valError) {
+    if (valError instanceof StructuredExtractionValidationError) {
+      throw new IntelligenceValidationError(valError.message, { cause: valError });
+    }
+    throw valError;
+  }
+}
+
+/**
+ * Loads persisted sections for documentId and performs grounded structured extraction (Slice 3.3).
+ *
+ * @param documentId - UUID of the target document
+ * @param options - Validation options
+ * @returns Validated structured extraction result
+ */
+export async function extractDocumentMetadata(
+  documentId: string,
+  options?: ValidateStructuredExtractionOptions
+): Promise<ValidatedStructuredExtraction> {
+  assertValidDocumentId(documentId);
+  const cleanDocId = documentId.trim();
+
+  const [doc] = await db
+    .select()
+    .from(documents)
+    .where(eq(documents.id, cleanDocId))
+    .limit(1);
+
+  if (!doc) {
+    throw new IntelligenceDocumentNotFoundError(cleanDocId);
+  }
+
+  const persistedSections = await db
+    .select()
+    .from(documentSections)
+    .where(eq(documentSections.documentId, cleanDocId))
+    .orderBy(asc(documentSections.orderIndex));
+
+  if (!persistedSections || persistedSections.length === 0) {
+    throw new IntelligenceValidationError(
+      `Cannot extract metadata for document ${cleanDocId}: no extracted sections found in database.`
+    );
+  }
+
+  const inputSections: IntelligenceInputSection[] = persistedSections.map((s) => ({
+    id: s.id,
+    orderIndex: s.orderIndex,
+    title: s.title,
+    content: s.content,
+    pageStart: s.pageStart,
+    pageEnd: s.pageEnd,
+  }));
+
+  return await extractDocumentContent(
+    inputSections,
+    {
+      filename: doc.originalFilename,
+      pageCount: doc.pageCount,
+    },
+    options
+  );
+}
+
+/**
+ * Persists validated structured extraction into the database (Slice 3.3).
+ *
+ * Invariants:
+ * 1. Replaces previous extraction metadata (idempotent / no duplicate parties or dates).
+ * 2. Updates documents.parties, documents.governingLaw, documents.jurisdiction.
+ * 3. Stores complete evidenced collections in documents.metadata.extraction.
+ * 4. Leaves document_sections, document_chunks, and document_findings completely untouched.
+ *
+ * @param documentId - UUID of the document
+ * @param extraction - Validated structured extraction result
+ * @returns Updated document record
+ */
+export async function persistDocumentExtraction(
+  documentId: string,
+  extraction: ValidatedStructuredExtraction
+): Promise<Document> {
+  assertValidDocumentId(documentId);
+  const cleanDocId = documentId.trim();
+
+  const [existingDoc] = await db
+    .select()
+    .from(documents)
+    .where(eq(documents.id, cleanDocId))
+    .limit(1);
+
+  if (!existingDoc) {
+    throw new IntelligenceDocumentNotFoundError(cleanDocId);
+  }
+
+  const existingMetadata =
+    existingDoc.metadata && typeof existingDoc.metadata === "object"
+      ? (existingDoc.metadata as Record<string, unknown>)
+      : {};
+
+  const simplifiedParties = extraction.parties.map((p) => ({
+    name: p.name,
+    role: p.role,
+  }));
+
+  const updatedMetadata: Record<string, unknown> = {
+    ...existingMetadata,
+    extraction: {
+      parties: extraction.parties,
+      governingLaw: extraction.governingLaw,
+      jurisdiction: extraction.jurisdiction,
+      importantDates: extraction.importantDates,
+      financialTerms: extraction.financialTerms,
+      importantSections: extraction.importantSections,
+    },
+    importantDates: extraction.importantDates,
+    financialTerms: extraction.financialTerms,
+    importantSections: extraction.importantSections,
+  };
+
+  const [updatedDoc] = await db
+    .update(documents)
+    .set({
+      parties: simplifiedParties,
+      governingLaw: extraction.governingLaw?.law ?? null,
+      jurisdiction: extraction.jurisdiction?.jurisdiction ?? null,
+      metadata: updatedMetadata,
+      updatedAt: new Date(),
+    })
+    .where(eq(documents.id, cleanDocId))
+    .returning();
+
+  if (!updatedDoc) {
+    throw new IntelligenceError(
+      `Failed to update document structured extraction for ${cleanDocId}`
+    );
+  }
+
+  return updatedDoc;
+}
+
+/**
+ * Executes grounded extraction and persists validated metadata (Slice 3.3).
+ *
+ * If extraction or evidence validation fails:
+ * - Phase 2 sections and chunks are left 100% untouched.
+ * - No invalid or unverified metadata is persisted.
+ *
+ * @param documentId - UUID of the document
+ * @param options - Extraction options
+ * @returns Updated document and validated extraction
+ */
+export async function extractAndPersistDocumentMetadata(
+  documentId: string,
+  options?: ValidateStructuredExtractionOptions
+): Promise<{ document: Document; extraction: ValidatedStructuredExtraction }> {
+  assertValidDocumentId(documentId);
+  const cleanDocId = documentId.trim();
+
+  const extraction = await extractDocumentMetadata(cleanDocId, options);
+  const updatedDoc = await persistDocumentExtraction(cleanDocId, extraction);
+
+  return { document: updatedDoc, extraction };
+}
+
 
 
