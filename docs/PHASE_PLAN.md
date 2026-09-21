@@ -165,8 +165,10 @@ processDocumentExtraction(documentId) [Synchronous Server Processing]
   ├─ download stored file from private storage
   ├─ extractDocumentText()
   └─ persistDocumentExtraction() [TRANSACTION]
-       ├─ delete previous document_sections (reprocessing idempotency)
+       ├─ delete previous document_chunks & document_sections (reprocessing idempotency)
        ├─ insert new document_sections (preserve order, title, content, page coords)
+       ├─ chunkSections(insertedSections) (deterministic section-to-chunk transformation)
+       ├─ insert new document_chunks (sequential chunk_index, section_id, content, page_number)
        └─ update document (status: ready, page_count)
        ↓
      COMMIT
@@ -238,6 +240,43 @@ Return 201 Response with Processed Document
 - **Tests**:
   - Service unit tests in `tests/unit/document-workspace-service.test.ts` (ownership, validation, sorting, error masking)
   - UI unit tests in `tests/unit/document-workspace-ui.test.tsx` (multi/single section, page coordinates, fallbacks, statuses, content safety)
+
+### Slice 2.4 — Document Chunking & Retrieval-Ready Persistence (✅ Complete)
+- **Database**:
+  - `document_chunks` table in `lib/db/schema.ts` (`id`, `document_id`, `section_id`, `chunk_index`, `content`, `page_number`, `token_count`, `created_at`, `updated_at`)
+  - Foreign key cascades on `document_id` and `section_id` (`onDelete: cascade`)
+  - Drizzle migration generated (`0003_brief_iron_man.sql`)
+  - Relations defined (`documentChunksRelations.document`, `documentChunksRelations.section`, `documentsRelations.chunks`, `documentSectionsRelations.chunks`)
+  - pgvector and embeddings intentionally omitted until Phase 3
+- **Domain Services**:
+  - `lib/services/chunking-service.ts`:
+    - Pure domain service with zero DB, storage, or external dependencies
+    - Deterministic section-to-chunk segmentation with configurable `maxChunkChars` (default 1500)
+    - Section isolation: chunks never span across section boundaries
+    - Paragraph and sentence boundary preservation, avoiding splitting words
+    - Substantive text preservation with whitespace normalization
+    - Format-agnostic page reference propagation: `section.pageStart ?? null`
+    - Globally sequential, zero-based `chunkIndex` across all sections in the document
+    - Approximate token count heuristic: `Math.ceil(length / 4)`
+    - Defensive empty content handling: whitespace-only sections emit 0 chunks
+  - `lib/services/chunk-persistence-service.ts`:
+    - `persistDocumentChunks`, `deleteDocumentChunks`, `getDocumentChunks`
+    - Supports atomic participation in existing database transactions
+    - Sanitizes database errors to prevent credential or URL leakage
+- **Extraction Persistence Integration**:
+  - `persistDocumentExtraction()` extended within single atomic transaction:
+    1. Deletes previous chunks and sections for document (idempotency)
+    2. Inserts new sections
+    3. Transforms newly inserted sections via `chunkSections(insertedSections)`
+    4. Guards against 0 chunks (empty content fails and aborts)
+    5. Inserts chunks into `document_chunks`
+    6. Updates document to `status: "ready"`
+  - Rollback on failure ensures no partial records or premature `ready` state
+- **Tests**:
+  - `tests/unit/chunking-service.test.ts` (14 tests: sizing, paragraph/sentence boundaries, Unicode, empty content, determinism, page propagation)
+  - `tests/unit/chunk-persistence-service.test.ts` (11 tests: insertion, ordering, deletion, error masking)
+  - `tests/unit/extraction-persistence.test.ts` (16 tests: full transactional integration, reprocessing, rollback on chunk failure or 0 chunks)
+  - 188 total tests passing across 13 test suites
 
 ---
 

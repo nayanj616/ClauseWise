@@ -166,6 +166,40 @@ export const documentSections = pgTable("document_sections", {
 });
 
 // ---------------------------------------------------------------------------
+// DocumentChunk — Phase 2 Slice 2.4
+// Represents a deterministic, retrieval-ready chunk of text derived from a section.
+// Embedding vector column is explicitly deferred to Phase 3.
+// ---------------------------------------------------------------------------
+
+export const documentChunks = pgTable("document_chunks", {
+  id: uuid("id")
+    .primaryKey()
+    .$defaultFn(() => crypto.randomUUID()),
+  documentId: uuid("document_id")
+    .notNull()
+    .references(() => documents.id, { onDelete: "cascade" }),
+  sectionId: uuid("section_id")
+    .notNull()
+    .references(() => documentSections.id, { onDelete: "cascade" }),
+  /** 0-indexed sequence within document */
+  chunkIndex: integer("chunk_index").notNull(),
+  /** Verbatim chunk text produced by deterministic chunker */
+  content: text("content").notNull(),
+  /**
+   * Source page reference (propagated format-agnostically from section pageStart;
+   * null when physical page numbers do not exist, e.g. DOCX/TXT)
+   */
+  pageNumber: integer("page_number"),
+  /**
+   * Approximate token count heuristic (Math.ceil(length / 4)).
+   * NOTE: Approximate metadata only; must NOT be used for enforcing model token limits.
+   */
+  tokenCount: integer("token_count"),
+  createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
+});
+
+// ---------------------------------------------------------------------------
 // Relations (Drizzle relational query API)
 // ---------------------------------------------------------------------------
 
@@ -186,12 +220,25 @@ export const sessionsRelations = relations(sessions, ({ one }) => ({
 export const documentsRelations = relations(documents, ({ one, many }) => ({
   user: one(users, { fields: [documents.userId], references: [users.id] }),
   sections: many(documentSections),
+  chunks: many(documentChunks),
 }));
 
-export const documentSectionsRelations = relations(documentSections, ({ one }) => ({
+export const documentSectionsRelations = relations(documentSections, ({ one, many }) => ({
   document: one(documents, {
     fields: [documentSections.documentId],
     references: [documents.id],
+  }),
+  chunks: many(documentChunks),
+}));
+
+export const documentChunksRelations = relations(documentChunks, ({ one }) => ({
+  document: one(documents, {
+    fields: [documentChunks.documentId],
+    references: [documents.id],
+  }),
+  section: one(documentSections, {
+    fields: [documentChunks.sectionId],
+    references: [documentSections.id],
   }),
 }));
 
@@ -205,4 +252,7 @@ export type Document = typeof documents.$inferSelect;
 export type NewDocument = typeof documents.$inferInsert;
 export type DocumentSection = typeof documentSections.$inferSelect;
 export type NewDocumentSection = typeof documentSections.$inferInsert;
+export type DocumentChunk = typeof documentChunks.$inferSelect;
+export type NewDocumentChunk = typeof documentChunks.$inferInsert;
+
 

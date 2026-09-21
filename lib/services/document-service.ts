@@ -34,6 +34,12 @@ import {
   ExtractionPersistenceError,
   type PersistenceResult,
 } from "./extraction-persistence-service";
+import {
+  getDocumentChunks,
+  deleteDocumentChunks,
+  persistDocumentChunks,
+  ChunkPersistenceError,
+} from "./chunk-persistence-service";
 
 export {
   persistDocumentExtraction,
@@ -41,6 +47,10 @@ export {
   DocumentNotFoundError,
   ExtractionPersistenceError,
   type PersistenceResult,
+  getDocumentChunks,
+  deleteDocumentChunks,
+  persistDocumentChunks,
+  ChunkPersistenceError,
 };
 
 export class DatabaseError extends Error {

@@ -90,8 +90,21 @@ type MockSection = {
   updatedAt: Date;
 };
 
+type MockChunk = {
+  id: string;
+  documentId: string;
+  sectionId: string;
+  chunkIndex: number;
+  content: string;
+  pageNumber: number | null;
+  tokenCount: number | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
 let inMemoryDocs: Map<string, MockDoc> = new Map();
 let inMemorySections: MockSection[] = [];
+let inMemoryChunks: MockChunk[] = [];
 let shouldFailTxInsert = false;
 let shouldFailFallbackUpdate = false;
 
@@ -119,18 +132,34 @@ vi.mock("@/lib/db", () => {
         const docId = (condition as { docId?: string })?.docId;
         if (docId) {
           inMemorySections = inMemorySections.filter((s) => s.documentId !== docId);
+          inMemoryChunks = inMemoryChunks.filter((c) => c.documentId !== docId);
         }
         return Promise.resolve();
       },
     }),
     insert: () => ({
-      values: (rows: Array<Omit<MockSection, "id" | "createdAt" | "updatedAt">>) => ({
+      values: (rows: Array<Record<string, any>>) => ({
         returning: async () => {
           if (shouldFailTxInsert) {
             throw new Error("DB insert failure: unique constraint violation or disk full");
           }
-          const created: MockSection[] = rows.map((r, i) => ({
-            id: `sec-uuid-${Date.now()}-${i}`,
+          if (rows.length > 0 && "chunkIndex" in rows[0]) {
+            const createdChunks: MockChunk[] = rows.map((r) => ({
+              id: crypto.randomUUID(),
+              documentId: r.documentId,
+              sectionId: r.sectionId,
+              chunkIndex: r.chunkIndex,
+              content: r.content,
+              pageNumber: r.pageNumber ?? null,
+              tokenCount: r.tokenCount ?? null,
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            }));
+            inMemoryChunks.push(...createdChunks);
+            return createdChunks;
+          }
+          const created: MockSection[] = rows.map((r) => ({
+            id: crypto.randomUUID(),
             documentId: r.documentId,
             orderIndex: r.orderIndex,
             sectionNumber: r.sectionNumber ?? r.orderIndex,
@@ -342,6 +371,7 @@ describe("Extraction Persistence Service (Slice 2.2)", () => {
     vi.clearAllMocks();
     inMemoryDocs.clear();
     inMemorySections = [];
+    inMemoryChunks = [];
     shouldFailTxInsert = false;
     shouldFailFallbackUpdate = false;
   });
@@ -377,9 +407,18 @@ describe("Extraction Persistence Service (Slice 2.2)", () => {
       expect(inMemorySections[0].title).toBe("Preamble");
       expect(inMemorySections[1].title).toBe("1. Definitions");
       expect(inMemorySections[2].title).toBe("2. Payment Terms");
+
+      // Verify chunks in result and DB map (Slice 2.4)
+      expect(result.chunks).toHaveLength(3);
+      expect(result.chunks[0].chunkIndex).toBe(0);
+      expect(result.chunks[0].sectionId).toBe(result.sections[0].id);
+      expect(result.chunks[0].documentId).toBe(VALID_DOC_ID);
+      expect(result.chunks[0].pageNumber).toBe(1);
+      expect(result.chunks[0].tokenCount).toBeGreaterThan(0);
+      expect(inMemoryChunks).toHaveLength(3);
     });
 
-    it("preserves PDF physical page coordinates on persisted sections", async () => {
+    it("preserves PDF physical page coordinates on persisted sections and chunks", async () => {
       seedDocument();
       const extraction = createSamplePdfExtraction();
 
@@ -387,12 +426,15 @@ describe("Extraction Persistence Service (Slice 2.2)", () => {
 
       expect(result.sections[0].pageStart).toBe(1);
       expect(result.sections[0].pageEnd).toBe(1);
+      expect(result.chunks[0].pageNumber).toBe(1);
 
       expect(result.sections[1].pageStart).toBe(1);
       expect(result.sections[1].pageEnd).toBe(2);
+      expect(result.chunks[1].pageNumber).toBe(1);
 
       expect(result.sections[2].pageStart).toBe(2);
       expect(result.sections[2].pageEnd).toBe(3);
+      expect(result.chunks[2].pageNumber).toBe(2);
     });
 
     it("stores null page coordinates for DOCX and TXT without fabricating page numbers", async () => {
@@ -403,12 +445,16 @@ describe("Extraction Persistence Service (Slice 2.2)", () => {
 
       expect(result.document.pageCount).toBeNull();
       expect(result.sections).toHaveLength(2);
+      expect(result.chunks).toHaveLength(2);
 
       // Must be null, never 0 or 1
       expect(result.sections[0].pageStart).toBeNull();
       expect(result.sections[0].pageEnd).toBeNull();
+      expect(result.chunks[0].pageNumber).toBeNull();
+
       expect(result.sections[1].pageStart).toBeNull();
       expect(result.sections[1].pageEnd).toBeNull();
+      expect(result.chunks[1].pageNumber).toBeNull();
     });
   });
 
@@ -446,6 +492,10 @@ describe("Extraction Persistence Service (Slice 2.2)", () => {
       expect(inMemorySections).toHaveLength(2);
       expect(inMemorySections[0].title).toBe("Updated Section A");
       expect(inMemorySections[1].title).toBe("Updated Section B");
+
+      // Previous 3 chunks replaced by 2 new chunks (Slice 2.4)
+      expect(result.chunks).toHaveLength(2);
+      expect(inMemoryChunks).toHaveLength(2);
 
       // Preserves original document ID
       expect(result.document.id).toBe(VALID_DOC_ID);
@@ -576,6 +626,34 @@ describe("Extraction Persistence Service (Slice 2.2)", () => {
         expect(section.documentId).toBe(VALID_DOC_ID);
         expect(section.documentId).not.toBe(otherDocId);
       }
+      for (const chunk of result.chunks) {
+        expect(chunk.documentId).toBe(VALID_DOC_ID);
+        expect(chunk.documentId).not.toBe(otherDocId);
+      }
+    });
+
+    it("rolls back transaction and updates document status to 'error' when chunking generates 0 chunks", async () => {
+      seedDocument();
+      const whitespaceOnlyExtraction: DocumentExtractionResult = {
+        text: "Some non-empty document text",
+        format: "pdf",
+        sections: [
+          {
+            orderIndex: 0,
+            title: "Whitespace Section",
+            text: "   \n\n\t  ",
+          },
+        ],
+        metadata: { characterCount: 10, wordCount: 0, lineCount: 2 },
+      };
+
+      await expect(
+        persistDocumentExtraction(VALID_DOC_ID, whitespaceOnlyExtraction)
+      ).rejects.toThrow("No valid text chunks could be generated");
+
+      const doc = inMemoryDocs.get(VALID_DOC_ID);
+      expect(doc?.status).toBe("error");
+      expect(inMemoryChunks).toHaveLength(0);
     });
   });
 

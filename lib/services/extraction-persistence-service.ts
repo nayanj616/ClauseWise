@@ -23,10 +23,16 @@ import {
   documentSections,
   type Document,
   type DocumentSection,
+  type DocumentChunk,
 } from "@/lib/db/schema";
 import { downloadDocumentFile } from "@/lib/storage/storage-client";
 import { extractDocumentText } from "@/lib/services/extraction-service";
 import type { DocumentExtractionResult } from "@/lib/extraction/types";
+import { chunkSections } from "@/lib/services/chunking-service";
+import {
+  deleteDocumentChunks,
+  persistDocumentChunks,
+} from "@/lib/services/chunk-persistence-service";
 
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -48,6 +54,7 @@ export class ExtractionPersistenceError extends Error {
 export interface PersistenceResult {
   document: Document;
   sections: DocumentSection[];
+  chunks: DocumentChunk[];
 }
 
 /**
@@ -151,7 +158,8 @@ export async function persistDocumentExtraction(
         throw new DocumentNotFoundError(cleanDocId);
       }
 
-      // 2. Remove previous sections (idempotent replacement / reprocessing)
+      // 2. Remove previous chunks and sections (idempotent replacement / reprocessing)
+      await deleteDocumentChunks(cleanDocId, tx);
       await tx
         .delete(documentSections)
         .where(eq(documentSections.documentId, cleanDocId));
@@ -173,7 +181,29 @@ export async function persistDocumentExtraction(
         .values(sectionRows)
         .returning();
 
-      // 5. Update document extraction metadata and transition to 'ready'
+      // 5. Generate deterministic chunks from the freshly inserted sections
+      const generatedChunks = chunkSections(
+        insertedSections.map((sec) => ({
+          id: sec.id,
+          documentId: sec.documentId,
+          content: sec.content,
+          orderIndex: sec.orderIndex,
+          pageStart: sec.pageStart,
+          pageEnd: sec.pageEnd,
+        }))
+      );
+
+      // Guard: empty content or failure to produce chunks prevents document from becoming ready
+      if (generatedChunks.length === 0) {
+        throw new ExtractionPersistenceError(
+          "No valid text chunks could be generated from document sections"
+        );
+      }
+
+      // 6. Persist chunks
+      const insertedChunks = await persistDocumentChunks(generatedChunks, tx);
+
+      // 7. Update document extraction metadata and transition to 'ready'
       const [updatedDoc] = await tx
         .update(documents)
         .set({
@@ -197,6 +227,7 @@ export async function persistDocumentExtraction(
       return {
         document: updatedDoc,
         sections: insertedSections,
+        chunks: insertedChunks,
       };
     });
   } catch (error) {
