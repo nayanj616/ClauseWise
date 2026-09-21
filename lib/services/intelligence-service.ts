@@ -19,8 +19,12 @@ import {
   documentSections,
   documentChunks,
 } from "@/lib/db/schema";
-import { openaiClient, MODELS, TEMPERATURES } from "@/lib/ai/openai-client";
-import { zodResponseFormat } from "openai/helpers/zod";
+import {
+  generateStructuredOutput,
+  MODELS,
+  TEMPERATURES,
+  AI_LIMITS,
+} from "@/lib/ai/openai-client";
 import { RawAiIntelligenceResponseSchema } from "@/lib/intelligence/schemas";
 import {
   buildIntelligenceSystemPrompt,
@@ -150,40 +154,20 @@ export async function analyzeDocumentIntelligence(
     pageCount: payload.pageCount,
   });
 
-  // 6. Invoke OpenAI with Structured Outputs
+  // 6. Invoke OpenAI with Structured Outputs via infrastructure adapter
   let rawParsed;
   try {
-    const completion = await openaiClient.beta.chat.completions.parse({
+    rawParsed = await generateStructuredOutput({
       model: MODELS.CHAT,
       temperature: TEMPERATURES.ANALYSIS,
+      maxTokens: AI_LIMITS.MAX_COMPLETION_TOKENS,
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
-      response_format: zodResponseFormat(
-        RawAiIntelligenceResponseSchema,
-        "document_intelligence"
-      ),
-      max_tokens: 4096,
+      schema: RawAiIntelligenceResponseSchema,
+      name: "document_intelligence",
     });
-
-    const choice = completion.choices[0];
-    if (!choice) {
-      throw new OpenAiInferenceError("OpenAI returned an empty choices array.");
-    }
-
-    if (choice.message.refusal) {
-      throw new OpenAiInferenceError(
-        `OpenAI refused to analyze the document: ${choice.message.refusal}`
-      );
-    }
-
-    rawParsed = choice.message.parsed;
-    if (!rawParsed) {
-      throw new OpenAiInferenceError(
-        "OpenAI completed without a valid parsed intelligence structure."
-      );
-    }
   } catch (error) {
     if (error instanceof OpenAiInferenceError) {
       throw error;

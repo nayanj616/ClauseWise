@@ -20,21 +20,45 @@ vi.mock("@/lib/db", () => {
 
 // Mock OpenAI client
 vi.mock("@/lib/ai/openai-client", () => {
+  const mockParse = vi.fn();
   return {
     openaiClient: {
       beta: {
         chat: {
           completions: {
-            parse: vi.fn(),
+            parse: mockParse,
           },
         },
       },
     },
+    generateStructuredOutput: vi.fn(async (options: any) => {
+      const completion = await mockParse(options);
+      const choice = completion?.choices?.[0];
+      if (!choice) {
+        throw new Error("OpenAI returned an empty choices array.");
+      }
+      if (choice.message?.refusal) {
+        throw new Error(
+          `OpenAI refused to analyze the document: ${choice.message.refusal}`
+        );
+      }
+      if (!choice.message?.parsed) {
+        throw new Error(
+          "OpenAI completed without a valid parsed intelligence structure."
+        );
+      }
+      return choice.message.parsed;
+    }),
     MODELS: {
       CHAT: "gpt-4o",
     },
     TEMPERATURES: {
       ANALYSIS: 0.1,
+    },
+    AI_LIMITS: {
+      MAX_COMPLETION_TOKENS: 4096,
+      DEFAULT_TIMEOUT_MS: 60000,
+      MAX_RETRIES: 2,
     },
   };
 });
