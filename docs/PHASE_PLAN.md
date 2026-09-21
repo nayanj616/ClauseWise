@@ -209,6 +209,36 @@ Return 201 Response with Processed Document
   - 15 new persistence tests in `tests/unit/extraction-persistence.test.ts`
   - 137 total automated tests passing across 9 test suites
 
+### Slice 2.3 — Document Workspace / Extracted Content Viewer (✅ Complete)
+- **Route**:
+  - `app/(app)/documents/[documentId]/page.tsx` (`/documents/[documentId]`)
+  - Server Component enforcing verified session ownership via `requireSession()`
+- **Domain Service**:
+  - `getDocumentWorkspaceData(documentId, userId)` in `lib/services/document-service.ts`
+  - Strictly requires `userId` and scopes queries to `and(eq(documents.id, cleanDocId), eq(documents.userId, cleanUserId))`
+  - Loads sections ordered by `asc(documentSections.orderIndex)`
+  - Explicitly strips `storagePath` and internal details from public workspace shape
+  - Translates unexpected DB failures into safe `DatabaseError`
+- **UI Components**:
+  - `components/workspace/DocumentViewer.tsx`:
+    - Header with document filename, status badge (`Ready`), format badge, size, page count, and back button
+    - Multi-section layout: left sidebar navigation in persisted order, active section highlight (`aria-current="true"`), previous/next buttons
+    - Single-section layout: direct content rendering without redundant sidebar
+    - Source location formatting: `Page X`, `Pages X–Y`, null suppressed for DOCX/TXT
+    - Local `useState` for active section selection
+  - `components/workspace/WorkspaceStates.tsx`:
+    - `DocumentProcessingState`: displays status and explains content is not yet available
+    - `DocumentErrorState`: safe user-facing error message, no sensitive data exposed
+    - `EmptyContentState`: explains no readable text was extracted
+    - `DocumentNotFoundState`: friendly 404 message for nonexistent or unauthorized documents
+  - `components/workspace/DocumentWorkspace.tsx`:
+    - State router: `ready` (viewer/empty), `error` (error state), all other existing statuses (processing state)
+  - `components/document/DocumentUpload.tsx`:
+    - Success card renders "Open in Workspace" button linking to `/documents/${uploadedDocument.id}`
+- **Tests**:
+  - Service unit tests in `tests/unit/document-workspace-service.test.ts` (ownership, validation, sorting, error masking)
+  - UI unit tests in `tests/unit/document-workspace-ui.test.tsx` (multi/single section, page coordinates, fallbacks, statuses, content safety)
+
 ---
 
 ## Phase 3 — Document Intelligence

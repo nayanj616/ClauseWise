@@ -10,8 +10,14 @@
  * SERVER-SIDE ONLY — do not import in client components.
  */
 
+import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { documents, type Document } from "@/lib/db/schema";
+import {
+  documents,
+  documentSections,
+  type Document,
+  type DocumentStatus,
+} from "@/lib/db/schema";
 import {
   uploadDocumentFile,
   deleteDocumentFile,
@@ -134,5 +140,143 @@ export async function uploadDocument(
   }
 
   return createdDoc;
+}
+
+// ---------------------------------------------------------------------------
+// Document Workspace Data Contracts & Service (Phase 2 Slice 2.3)
+// ---------------------------------------------------------------------------
+
+export interface WorkspaceDocument {
+  id: string;
+  filename: string;
+  mimeType: string;
+  fileSizeBytes: number;
+  documentType?: string | null;
+  status: DocumentStatus;
+  pageCount?: number | null;
+  createdAt: Date;
+  updatedAt: Date;
+  errorMessage?: string | null;
+}
+
+export interface WorkspaceSection {
+  id: string;
+  orderIndex: number;
+  sectionNumber: number | null;
+  title: string;
+  content: string;
+  pageStart: number | null;
+  pageEnd: number | null;
+}
+
+export interface DocumentWorkspaceData {
+  document: WorkspaceDocument;
+  sections: WorkspaceSection[];
+}
+
+const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Loads a document and its persisted sections for the Document Workspace.
+ * Strictly scopes query by documentId AND userId for access security.
+ * Excludes storagePath and internal database details.
+ *
+ * @param documentId - Target document UUID
+ * @param userId - Authenticated user UUID (strictly required)
+ * @returns DocumentWorkspaceData or null if not found or unauthorized
+ */
+export async function getDocumentWorkspaceData(
+  documentId: string,
+  userId: string
+): Promise<DocumentWorkspaceData | null> {
+  // Validate inputs before querying
+  if (
+    !documentId ||
+    typeof documentId !== "string" ||
+    !UUID_REGEX.test(documentId.trim())
+  ) {
+    return null;
+  }
+
+  if (!userId || typeof userId !== "string" || !userId.trim()) {
+    return null;
+  }
+
+  const cleanDocId = documentId.trim();
+  const cleanUserId = userId.trim();
+
+  try {
+    // 1. Query document record scoped strictly by id AND userId
+    const [doc] = await db
+      .select({
+        id: documents.id,
+        title: documents.title,
+        originalFilename: documents.originalFilename,
+        mimeType: documents.mimeType,
+        fileSizeBytes: documents.fileSizeBytes,
+        status: documents.status,
+        pageCount: documents.pageCount,
+        errorMessage: documents.errorMessage,
+        createdAt: documents.createdAt,
+        updatedAt: documents.updatedAt,
+      })
+      .from(documents)
+      .where(
+        and(
+          eq(documents.id, cleanDocId),
+          eq(documents.userId, cleanUserId)
+        )
+      )
+      .limit(1);
+
+    if (!doc) {
+      return null;
+    }
+
+    // 2. Query persisted sections ordered by orderIndex ASC
+    const sections = await db
+      .select({
+        id: documentSections.id,
+        orderIndex: documentSections.orderIndex,
+        sectionNumber: documentSections.sectionNumber,
+        title: documentSections.title,
+        content: documentSections.content,
+        pageStart: documentSections.pageStart,
+        pageEnd: documentSections.pageEnd,
+      })
+      .from(documentSections)
+      .where(eq(documentSections.documentId, cleanDocId))
+      .orderBy(asc(documentSections.orderIndex));
+
+    return {
+      document: {
+        id: doc.id,
+        filename: doc.originalFilename || doc.title,
+        mimeType: doc.mimeType,
+        fileSizeBytes: doc.fileSizeBytes,
+        documentType: null,
+        status: doc.status,
+        pageCount: doc.pageCount,
+        createdAt: doc.createdAt,
+        updatedAt: doc.updatedAt,
+        errorMessage: doc.errorMessage,
+      },
+      sections: sections.map((s) => ({
+        id: s.id,
+        orderIndex: s.orderIndex,
+        sectionNumber: s.sectionNumber,
+        title: s.title,
+        content: s.content,
+        pageStart: s.pageStart,
+        pageEnd: s.pageEnd,
+      })),
+    };
+  } catch (error) {
+    console.error(`[getDocumentWorkspaceData] Database error for doc ${cleanDocId}:`, error);
+    throw new DatabaseError("Failed to retrieve document workspace data", {
+      cause: error,
+    });
+  }
 }
 

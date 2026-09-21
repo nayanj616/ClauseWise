@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import {
   Upload,
   FileText,
@@ -9,6 +10,7 @@ import {
   Loader2,
   X,
   RotateCw,
+  ExternalLink,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -196,16 +198,24 @@ export function DocumentUpload({ onSuccess, className }: DocumentUploadProps) {
               )}
             </div>
           </div>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={handleReset}
-            className="mt-2 gap-2"
-          >
-            <Upload size={14} aria-hidden="true" />
-            Upload another document
-          </Button>
+          <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
+            <Button asChild size="sm" className="gap-2">
+              <Link href={`/documents/${uploadedDocument.id}`}>
+                <ExternalLink size={14} aria-hidden="true" />
+                Open in Workspace
+              </Link>
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleReset}
+              className="gap-2"
+            >
+              <Upload size={14} aria-hidden="true" />
+              Upload another document
+            </Button>
+          </div>
         </div>
       )}
 

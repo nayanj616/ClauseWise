@@ -22,7 +22,12 @@ export interface ActionResult {
 // Document
 // ---------------------------------------------------------------------------
 
-export type { Document, DocumentStatus } from "@/lib/db/schema";
+export type { Document, DocumentStatus, DocumentSection } from "@/lib/db/schema";
+export type {
+  WorkspaceDocument,
+  WorkspaceSection,
+  DocumentWorkspaceData,
+} from "@/lib/services/document-service";
 
 /** Human-readable labels for document status values */
 export const DOCUMENT_STATUS_LABELS: Record<string, string> = {
