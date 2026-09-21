@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { requireSession } from "@/lib/auth/session";
 import { getDocumentWorkspaceData } from "@/lib/services/document-service";
+import { getPersistedDocumentFindings } from "@/lib/services/intelligence-service";
 import { DocumentWorkspace } from "@/components/workspace/DocumentWorkspace";
 import { DocumentNotFoundState } from "@/components/workspace/WorkspaceStates";
 
@@ -14,13 +15,13 @@ export async function generateMetadata({
   const { documentId } = await params;
   return {
     title: `Document Workspace`,
-    description: `View extracted document clauses, sections, and metadata`,
+    description: `View extracted document clauses, sections, and intelligence analysis`,
   };
 }
 
 /**
- * Document Workspace Page — Phase 2 Slice 2.3
- * Server component loading persisted document metadata and sections.
+ * Document Workspace Page — Phase 3 Slice 3.6
+ * Server component loading persisted document metadata, sections, and findings.
  * Enforces ownership strictly by session.user.id.
  */
 export default async function DocumentWorkspacePage({
@@ -40,9 +41,12 @@ export default async function DocumentWorkspacePage({
     );
   }
 
+  // Retrieve persisted findings for this document
+  const findings = await getPersistedDocumentFindings(documentId);
+
   return (
-    <div className="p-6 sm:p-8 max-w-6xl mx-auto w-full">
-      <DocumentWorkspace data={data} />
+    <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto w-full">
+      <DocumentWorkspace data={data} findings={findings} />
     </div>
   );
 }

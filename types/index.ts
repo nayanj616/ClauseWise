@@ -112,6 +112,8 @@ export type {
   ValidatedJurisdiction,
   ValidatedImportantSection,
   ValidatedClassification,
+  ValidatedDate,
+  ValidatedFinancialTerm,
   ValidatedIntelligenceResult,
   RawAiIntelligenceResponse,
   RawAiFinding,

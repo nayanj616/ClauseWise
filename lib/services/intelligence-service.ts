@@ -987,5 +987,41 @@ export async function generateAndPersistDocumentFindings(
   return { findings: persistedFindings, rejectedCount };
 }
 
+/**
+ * Retrieves persisted document findings for a document (Slice 3.6).
+ *
+ * Scoped by documentId, ordered by pageNumber ASC NULLS LAST, createdAt ASC.
+ * Excludes internal errors and raw database connection details.
+ *
+ * @param documentId - UUID of the target document
+ * @returns Array of persisted DocumentFinding records (empty if none)
+ */
+export async function getPersistedDocumentFindings(
+  documentId: string
+): Promise<DocumentFinding[]> {
+  if (!documentId || typeof documentId !== "string" || !UUID_REGEX.test(documentId.trim())) {
+    return [];
+  }
+
+  const cleanDocId = documentId.trim();
+
+  try {
+    return await db
+      .select()
+      .from(documentFindings)
+      .where(eq(documentFindings.documentId, cleanDocId))
+      .orderBy(asc(documentFindings.pageNumber), asc(documentFindings.createdAt));
+  } catch (error) {
+    console.error(
+      `[getPersistedDocumentFindings] Database error for doc ${cleanDocId}:`,
+      error
+    );
+    throw new IntelligenceError("Failed to retrieve document findings", {
+      cause: error,
+    });
+  }
+}
+
+
 
 

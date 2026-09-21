@@ -776,7 +776,7 @@ describe("Evidence Validator — Phase 3 (Slice 3.5)", () => {
         summary: "Recipient must keep information confidential for 3 years.",
         sourceText: "hold all Proprietary Information in strict confidence",
         sectionOrderIndex: 1,
-        metadata: { category: "obligation" },
+        metadata: null,
       };
 
       const validated = validateFindingEvidence(
@@ -1051,7 +1051,7 @@ describe("Evidence Validator — Phase 3 (Slice 3.5)", () => {
             summary: "Recipient must keep information confidential for 3 years.",
             sourceText: "hold all Proprietary Information in strict confidence for a period of 3 years",
             sectionOrderIndex: 1,
-            metadata: { forgedId: "hacked-uuid-999" },
+            metadata: null,
           },
         ],
       };

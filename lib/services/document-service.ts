@@ -167,6 +167,10 @@ export interface WorkspaceDocument {
   createdAt: Date;
   updatedAt: Date;
   errorMessage?: string | null;
+  governingLaw?: string | null;
+  jurisdiction?: string | null;
+  parties?: Array<{ name: string; role: string | null }> | null;
+  metadata?: Record<string, unknown> | null;
 }
 
 export interface WorkspaceSection {
@@ -228,6 +232,11 @@ export async function getDocumentWorkspaceData(
         status: documents.status,
         pageCount: documents.pageCount,
         errorMessage: documents.errorMessage,
+        documentType: documents.documentType,
+        governingLaw: documents.governingLaw,
+        jurisdiction: documents.jurisdiction,
+        parties: documents.parties,
+        metadata: documents.metadata,
         createdAt: documents.createdAt,
         updatedAt: documents.updatedAt,
       })
@@ -265,12 +274,16 @@ export async function getDocumentWorkspaceData(
         filename: doc.originalFilename || doc.title,
         mimeType: doc.mimeType,
         fileSizeBytes: doc.fileSizeBytes,
-        documentType: null,
+        documentType: doc.documentType ?? null,
         status: doc.status,
         pageCount: doc.pageCount,
         createdAt: doc.createdAt,
         updatedAt: doc.updatedAt,
         errorMessage: doc.errorMessage,
+        governingLaw: doc.governingLaw ?? null,
+        jurisdiction: doc.jurisdiction ?? null,
+        parties: doc.parties ?? null,
+        metadata: doc.metadata ?? null,
       },
       sections: sections.map((s) => ({
         id: s.id,

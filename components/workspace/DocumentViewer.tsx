@@ -19,6 +19,9 @@ export interface DocumentViewerProps {
   document: WorkspaceDocument;
   sections: WorkspaceSection[];
   className?: string;
+  selectedIndex?: number;
+  onSelectIndex?: (index: number) => void;
+  hideHeader?: boolean;
 }
 
 /**
@@ -101,9 +104,22 @@ export function DocumentViewer({
   document,
   sections,
   className,
+  selectedIndex: controlledIndex,
+  onSelectIndex,
+  hideHeader = false,
 }: DocumentViewerProps) {
-  // Local state for active section selection (no URL query coupling)
-  const [selectedIndex, setSelectedIndex] = React.useState<number>(0);
+  // Local state for active section selection (controlled or uncontrolled fallback)
+  const [internalIndex, setInternalIndex] = React.useState<number>(0);
+  const selectedIndex = typeof controlledIndex === "number" ? controlledIndex : internalIndex;
+
+  const setSelectedIndex = (updater: number | ((prev: number) => number)) => {
+    const nextVal = typeof updater === "function" ? updater(selectedIndex) : updater;
+    if (onSelectIndex) {
+      onSelectIndex(nextVal);
+    } else {
+      setInternalIndex(nextVal);
+    }
+  };
 
   // Guard against out-of-bounds index
   const safeIndex = Math.max(0, Math.min(selectedIndex, sections.length - 1));
@@ -122,68 +138,70 @@ export function DocumentViewer({
       data-testid="document-workspace-viewer"
     >
       {/* ----------------------------------------------------------------- */}
-      {/* Header Area                                                       */}
+      {/* Header Area (optional if workspace provides master header)        */}
       {/* ----------------------------------------------------------------- */}
-      <header className="rounded-xl border bg-card p-5 sm:p-6 shadow-sm space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <Button asChild variant="ghost" size="sm" className="gap-2 -ml-2 text-muted-foreground hover:text-foreground">
-            <Link href="/documents">
-              <ArrowLeft size={16} aria-hidden="true" />
-              Documents
-            </Link>
-          </Button>
+      {!hideHeader && (
+        <header className="rounded-xl border bg-card p-5 sm:p-6 shadow-sm space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <Button asChild variant="ghost" size="sm" className="gap-2 -ml-2 text-muted-foreground hover:text-foreground">
+              <Link href="/documents">
+                <ArrowLeft size={16} aria-hidden="true" />
+                Documents
+              </Link>
+            </Button>
 
-          <Badge variant="ready" className="gap-1.5 py-1 px-3">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-600 animate-pulse" aria-hidden="true" />
-            Ready
-          </Badge>
-        </div>
-
-        <div className="space-y-1">
-          <h1
-            className="text-xl sm:text-2xl font-bold tracking-tight text-foreground break-words"
-            title={document.filename}
-          >
-            {document.filename}
-          </h1>
-
-          {/* Metadata Badges */}
-          <div className="flex flex-wrap items-center gap-2 pt-1 text-xs text-muted-foreground">
-            <Badge variant="outline" className="font-medium text-xs">
-              {docFormat}
+            <Badge variant="ready" className="gap-1.5 py-1 px-3">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-600 animate-pulse" aria-hidden="true" />
+              Ready
             </Badge>
-
-            {document.fileSizeBytes > 0 && (
-              <span className="flex items-center gap-1">
-                <span>•</span>
-                <span>{formatFileSize(document.fileSizeBytes)}</span>
-              </span>
-            )}
-
-            {typeof document.pageCount === "number" && document.pageCount > 0 && (
-              <span className="flex items-center gap-1">
-                <span>•</span>
-                <span className="font-medium">{`${document.pageCount} ${document.pageCount === 1 ? "page" : "pages"}`}</span>
-              </span>
-            )}
-
-            {sections.length > 0 && (
-              <span className="flex items-center gap-1">
-                <span>•</span>
-                <span>{`${sections.length} ${sections.length === 1 ? "section" : "sections"}`}</span>
-              </span>
-            )}
-
-            {document.createdAt && (
-              <span className="flex items-center gap-1 hidden sm:inline-flex">
-                <span>•</span>
-                <Calendar size={12} aria-hidden="true" />
-                <span>{new Date(document.createdAt).toLocaleDateString()}</span>
-              </span>
-            )}
           </div>
-        </div>
-      </header>
+
+          <div className="space-y-1">
+            <h1
+              className="text-xl sm:text-2xl font-bold tracking-tight text-foreground break-words"
+              title={document.filename}
+            >
+              {document.filename}
+            </h1>
+
+            {/* Metadata Badges */}
+            <div className="flex flex-wrap items-center gap-2 pt-1 text-xs text-muted-foreground">
+              <Badge variant="outline" className="font-medium text-xs">
+                {docFormat}
+              </Badge>
+
+              {document.fileSizeBytes > 0 && (
+                <span className="flex items-center gap-1">
+                  <span>•</span>
+                  <span>{formatFileSize(document.fileSizeBytes)}</span>
+                </span>
+              )}
+
+              {typeof document.pageCount === "number" && document.pageCount > 0 && (
+                <span className="flex items-center gap-1">
+                  <span>•</span>
+                  <span className="font-medium">{`${document.pageCount} ${document.pageCount === 1 ? "page" : "pages"}`}</span>
+                </span>
+              )}
+
+              {sections.length > 0 && (
+                <span className="flex items-center gap-1">
+                  <span>•</span>
+                  <span>{`${sections.length} ${sections.length === 1 ? "section" : "sections"}`}</span>
+                </span>
+              )}
+
+              {document.createdAt && (
+                <span className="flex items-center gap-1 hidden sm:inline-flex">
+                  <span>•</span>
+                  <Calendar size={12} aria-hidden="true" />
+                  <span>{new Date(document.createdAt).toLocaleDateString()}</span>
+                </span>
+              )}
+            </div>
+          </div>
+        </header>
+      )}
 
       {/* ----------------------------------------------------------------- */}
       {/* Content Area: Single Section View                                 */}
