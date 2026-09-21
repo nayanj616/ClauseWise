@@ -47,23 +47,33 @@ import {
   normalizeDocumentTypeKey,
 } from "./expectation-catalog";
 
-export class ClassificationEvidenceValidationError extends Error {
-  constructor(message: string) {
-    super(message);
+/**
+ * Base error class for all evidence validation failures (Slice 3.5).
+ */
+export class EvidenceValidationError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = "EvidenceValidationError";
+  }
+}
+
+export class ClassificationEvidenceValidationError extends EvidenceValidationError {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
     this.name = "ClassificationEvidenceValidationError";
   }
 }
 
-export class StructuredExtractionValidationError extends Error {
-  constructor(message: string) {
-    super(message);
+export class StructuredExtractionValidationError extends EvidenceValidationError {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
     this.name = "StructuredExtractionValidationError";
   }
 }
 
-export class FindingEvidenceValidationError extends Error {
-  constructor(message: string) {
-    super(message);
+export class FindingEvidenceValidationError extends EvidenceValidationError {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
     this.name = "FindingEvidenceValidationError";
   }
 }
@@ -79,6 +89,7 @@ export function isSupportedDocumentType(
 
 export interface ValidateClassificationOptions {
   allowFallbackToGeneral?: boolean;
+  expectedDocumentId?: string;
 }
 
 /**
@@ -112,10 +123,22 @@ export function isExcerptInContent(content: string, excerpt: string): boolean {
 }
 
 /**
+ * Result returned by the unified section excerpt evidence verification primitive (Slice 3.5).
+ */
+export interface SectionExcerptEvidenceResult {
+  isValid: boolean;
+  targetSection: IntelligenceInputSection | null;
+  chunkId: string | null;
+  pageNumber: number | null;
+  cleanSourceText: string;
+  failureReason?: string;
+}
+
+/**
  * Locates the specific chunk within a section that contains the given sourceText excerpt.
  * Returns the matching chunkId and pageNumber if found.
  */
-function findMatchingChunk(
+export function findMatchingChunk(
   chunks: IntelligenceInputChunk[],
   sourceText: string,
   sectionFallbackPage: number | null
@@ -136,6 +159,121 @@ function findMatchingChunk(
   // Excerpt might span chunk boundary or chunks were segmented differently:
   // Return section fallback page
   return { chunkId: null, pageNumber: sectionFallbackPage };
+}
+
+/**
+ * Deterministically verifies whether a candidate sourceText excerpt exists within
+ * the referenced persisted section (Slice 3.5 core primitive).
+ *
+ * Invariants:
+ * 1. The LLM is never the source of truth.
+ * 2. sectionOrderIndex must be a non-negative integer present in sectionsByOrder.
+ * 3. If expectedDocumentId is provided and targetSection.documentId is present, they must match
+ *    (preventing cross-document reference contamination).
+ * 4. sourceText must be non-empty string.
+ * 5. Uses exact substring matching first, followed by whitespace-normalized matching.
+ * 6. Never uses fuzzy semantic guessing, embeddings, or probabilistic similarity.
+ * 7. Resolves authoritative chunkId and pageNumber if chunksBySectionId is provided.
+ */
+export function verifySectionExcerptEvidence(
+  sectionOrderIndex: number | null | undefined,
+  sourceText: string | null | undefined,
+  sectionsByOrder: Map<number, IntelligenceInputSection>,
+  chunksBySectionId?: Map<string, IntelligenceInputChunk[]>,
+  options?: { expectedDocumentId?: string }
+): SectionExcerptEvidenceResult {
+  if (
+    typeof sectionOrderIndex !== "number" ||
+    sectionOrderIndex < 0 ||
+    !Number.isInteger(sectionOrderIndex)
+  ) {
+    return {
+      isValid: false,
+      targetSection: null,
+      chunkId: null,
+      pageNumber: null,
+      cleanSourceText: "",
+      failureReason: `Invalid sectionOrderIndex: ${sectionOrderIndex}`,
+    };
+  }
+
+  const targetSection = sectionsByOrder.get(sectionOrderIndex);
+  if (!targetSection) {
+    return {
+      isValid: false,
+      targetSection: null,
+      chunkId: null,
+      pageNumber: null,
+      cleanSourceText: "",
+      failureReason: `Referenced section index ${sectionOrderIndex} does not exist in persisted sections`,
+    };
+  }
+
+  // Cross-document reference validation
+  if (
+    options?.expectedDocumentId &&
+    targetSection.documentId &&
+    targetSection.documentId !== options.expectedDocumentId
+  ) {
+    return {
+      isValid: false,
+      targetSection: null,
+      chunkId: null,
+      pageNumber: null,
+      cleanSourceText: "",
+      failureReason: `Section ${sectionOrderIndex} belongs to document ${targetSection.documentId}, not expected document ${options.expectedDocumentId}`,
+    };
+  }
+
+  if (!sourceText || typeof sourceText !== "string") {
+    return {
+      isValid: false,
+      targetSection,
+      chunkId: null,
+      pageNumber: targetSection.pageStart,
+      cleanSourceText: "",
+      failureReason: "sourceText is missing or not a string",
+    };
+  }
+
+  const cleanSourceText = sourceText.trim();
+  if (cleanSourceText.length === 0) {
+    return {
+      isValid: false,
+      targetSection,
+      chunkId: null,
+      pageNumber: targetSection.pageStart,
+      cleanSourceText: "",
+      failureReason: "sourceText is empty after trimming",
+    };
+  }
+
+  if (!isExcerptInContent(targetSection.content, cleanSourceText)) {
+    return {
+      isValid: false,
+      targetSection,
+      chunkId: null,
+      pageNumber: targetSection.pageStart,
+      cleanSourceText,
+      failureReason: `sourceText was not found in referenced section ${sectionOrderIndex}`,
+    };
+  }
+
+  // Authoritative chunk and page resolution
+  const sectionChunks = chunksBySectionId?.get(targetSection.id) ?? [];
+  const { chunkId, pageNumber } = findMatchingChunk(
+    sectionChunks,
+    cleanSourceText,
+    targetSection.pageStart
+  );
+
+  return {
+    isValid: true,
+    targetSection,
+    chunkId,
+    pageNumber,
+    cleanSourceText,
+  };
 }
 
 /**
@@ -166,14 +304,20 @@ export function validateIntelligenceEvidence(
   const rawClass = raw.classification;
 
   if (rawClass.isStatedInText && rawClass.sourceText && typeof rawClass.sectionOrderIndex === "number") {
-    const targetSection = sectionsByOrder.get(rawClass.sectionOrderIndex);
-    if (targetSection && isExcerptInContent(targetSection.content, rawClass.sourceText)) {
+    const check = verifySectionExcerptEvidence(
+      rawClass.sectionOrderIndex,
+      rawClass.sourceText,
+      sectionsByOrder,
+      undefined,
+      { expectedDocumentId: payload.documentId }
+    );
+    if (check.isValid && check.targetSection) {
       validatedClassification = {
         documentType: rawClass.documentType.trim(),
         isStatedInText: true,
-        sourceText: rawClass.sourceText.trim(),
-        sectionId: targetSection.id,
-        sectionOrderIndex: targetSection.orderIndex,
+        sourceText: check.cleanSourceText,
+        sectionId: check.targetSection.id,
+        sectionOrderIndex: check.targetSection.orderIndex,
         inferenceReason: rawClass.inferenceReason ?? null,
       };
     } else {
@@ -207,21 +351,12 @@ export function validateIntelligenceEvidence(
   // ---------------------------------------------------------------------------
   const validatedParties: ValidatedParty[] = [];
   for (const party of raw.parties) {
-    const sec = sectionsByOrder.get(party.sectionOrderIndex);
-    if (!sec) {
-      continue; // Dropped: invalid section index
-    }
-    if (!isExcerptInContent(sec.content, party.sourceText)) {
-      continue; // Dropped: sourceText not found in section
-    }
-
-    validatedParties.push({
-      name: party.name.trim(),
-      role: party.role?.trim() || null,
-      sourceText: party.sourceText.trim(),
-      sectionId: sec.id,
-      sectionOrderIndex: sec.orderIndex,
+    const validParty = validatePartyEvidence(party, sectionsByOrder, chunksBySectionId, {
+      expectedDocumentId: payload.documentId,
     });
+    if (validParty) {
+      validatedParties.push(validParty);
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -229,15 +364,12 @@ export function validateIntelligenceEvidence(
   // ---------------------------------------------------------------------------
   let validatedGoverningLaw: ValidatedGoverningLaw | null = null;
   if (raw.governingLaw) {
-    const sec = sectionsByOrder.get(raw.governingLaw.sectionOrderIndex);
-    if (sec && isExcerptInContent(sec.content, raw.governingLaw.sourceText)) {
-      validatedGoverningLaw = {
-        law: raw.governingLaw.law.trim(),
-        sourceText: raw.governingLaw.sourceText.trim(),
-        sectionId: sec.id,
-        sectionOrderIndex: sec.orderIndex,
-      };
-    }
+    validatedGoverningLaw = validateGoverningLawEvidence(
+      raw.governingLaw,
+      sectionsByOrder,
+      chunksBySectionId,
+      { expectedDocumentId: payload.documentId }
+    );
   }
 
   // ---------------------------------------------------------------------------
@@ -245,15 +377,12 @@ export function validateIntelligenceEvidence(
   // ---------------------------------------------------------------------------
   let validatedJurisdiction: ValidatedJurisdiction | null = null;
   if (raw.jurisdiction) {
-    const sec = sectionsByOrder.get(raw.jurisdiction.sectionOrderIndex);
-    if (sec && isExcerptInContent(sec.content, raw.jurisdiction.sourceText)) {
-      validatedJurisdiction = {
-        jurisdiction: raw.jurisdiction.jurisdiction.trim(),
-        sourceText: raw.jurisdiction.sourceText.trim(),
-        sectionId: sec.id,
-        sectionOrderIndex: sec.orderIndex,
-      };
-    }
+    validatedJurisdiction = validateJurisdictionEvidence(
+      raw.jurisdiction,
+      sectionsByOrder,
+      chunksBySectionId,
+      { expectedDocumentId: payload.documentId }
+    );
   }
 
   // ---------------------------------------------------------------------------
@@ -261,16 +390,12 @@ export function validateIntelligenceEvidence(
   // ---------------------------------------------------------------------------
   const validatedImportantSections: ValidatedImportantSection[] = [];
   for (const impSec of raw.importantSections) {
-    const sec = sectionsByOrder.get(impSec.sectionOrderIndex);
-    if (!sec) {
-      continue; // Dropped: nonexistent section index
-    }
-    validatedImportantSections.push({
-      sectionId: sec.id,
-      sectionOrderIndex: sec.orderIndex,
-      title: sec.title || impSec.title.trim(),
-      reason: impSec.reason.trim(),
+    const validSec = validateImportantSectionEvidence(impSec, sectionsByOrder, {
+      expectedDocumentId: payload.documentId,
     });
+    if (validSec) {
+      validatedImportantSections.push(validSec);
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -363,6 +488,16 @@ export function validateClassificationEvidence(
       );
     }
 
+    if (
+      options?.expectedDocumentId &&
+      targetSection.documentId &&
+      targetSection.documentId !== options.expectedDocumentId
+    ) {
+      throw new ClassificationEvidenceValidationError(
+        `Classification section ${raw.sectionOrderIndex} belongs to document ${targetSection.documentId}, not expected document ${options.expectedDocumentId}.`
+      );
+    }
+
     if (!isExcerptInContent(targetSection.content, raw.sourceText)) {
       throw new ClassificationEvidenceValidationError(
         `Classification source text "${raw.sourceText.trim()}" was not found in referenced section ${raw.sectionOrderIndex}.`
@@ -393,129 +528,192 @@ export function validateClassificationEvidence(
 }
 
 // ---------------------------------------------------------------------------
-// Slice 3.3 — Structured Extraction Evidence Validation
+// Slice 3.3 & 3.5 — Structured Extraction Evidence Validation
 // ---------------------------------------------------------------------------
 
 export interface ValidateStructuredExtractionOptions {
   strict?: boolean;
+  documentId?: string;
+  chunks?: IntelligenceInputChunk[];
 }
 
 /**
- * Validates a single party against document sections.
+ * Validates a single party against document sections (Slice 3.3 / 3.5).
  * Returns ValidatedParty if valid, or null if invalid.
  */
 export function validatePartyEvidence(
   party: RawAiParty,
-  sectionsByOrder: Map<number, IntelligenceInputSection>
+  sectionsByOrder: Map<number, IntelligenceInputSection>,
+  chunksBySectionId?: Map<string, IntelligenceInputChunk[]>,
+  options?: { expectedDocumentId?: string }
 ): ValidatedParty | null {
-  const targetSec = sectionsByOrder.get(party.sectionOrderIndex);
-  if (!targetSec) return null;
-  if (!isExcerptInContent(targetSec.content, party.sourceText)) return null;
+  if (!party.name || party.name.trim().length === 0) return null;
+
+  const check = verifySectionExcerptEvidence(
+    party.sectionOrderIndex,
+    party.sourceText,
+    sectionsByOrder,
+    chunksBySectionId,
+    options
+  );
+  if (!check.isValid || !check.targetSection) return null;
 
   return {
     name: party.name.trim(),
     role: party.role?.trim() || null,
-    sourceText: party.sourceText.trim(),
-    sectionId: targetSec.id,
-    sectionOrderIndex: targetSec.orderIndex,
+    sourceText: check.cleanSourceText,
+    sectionId: check.targetSection.id,
+    sectionOrderIndex: check.targetSection.orderIndex,
   };
 }
 
 /**
- * Validates a governing law provision against document sections.
+ * Validates a governing law provision against document sections (Slice 3.3 / 3.5).
  * Returns ValidatedGoverningLaw if valid, or null if invalid.
  */
 export function validateGoverningLawEvidence(
   law: RawAiGoverningLaw,
-  sectionsByOrder: Map<number, IntelligenceInputSection>
+  sectionsByOrder: Map<number, IntelligenceInputSection>,
+  chunksBySectionId?: Map<string, IntelligenceInputChunk[]>,
+  options?: { expectedDocumentId?: string }
 ): ValidatedGoverningLaw | null {
-  const targetSec = sectionsByOrder.get(law.sectionOrderIndex);
-  if (!targetSec) return null;
-  if (!isExcerptInContent(targetSec.content, law.sourceText)) return null;
+  if (!law.law || law.law.trim().length === 0) return null;
+
+  const check = verifySectionExcerptEvidence(
+    law.sectionOrderIndex,
+    law.sourceText,
+    sectionsByOrder,
+    chunksBySectionId,
+    options
+  );
+  if (!check.isValid || !check.targetSection) return null;
 
   return {
     law: law.law.trim(),
-    sourceText: law.sourceText.trim(),
-    sectionId: targetSec.id,
-    sectionOrderIndex: targetSec.orderIndex,
+    sourceText: check.cleanSourceText,
+    sectionId: check.targetSection.id,
+    sectionOrderIndex: check.targetSection.orderIndex,
   };
 }
 
 /**
- * Validates a jurisdiction provision against document sections.
+ * Validates a jurisdiction provision against document sections (Slice 3.3 / 3.5).
  * Returns ValidatedJurisdiction if valid, or null if invalid.
  */
 export function validateJurisdictionEvidence(
   jurisdiction: RawAiJurisdiction,
-  sectionsByOrder: Map<number, IntelligenceInputSection>
+  sectionsByOrder: Map<number, IntelligenceInputSection>,
+  chunksBySectionId?: Map<string, IntelligenceInputChunk[]>,
+  options?: { expectedDocumentId?: string }
 ): ValidatedJurisdiction | null {
-  const targetSec = sectionsByOrder.get(jurisdiction.sectionOrderIndex);
-  if (!targetSec) return null;
-  if (!isExcerptInContent(targetSec.content, jurisdiction.sourceText)) return null;
+  if (!jurisdiction.jurisdiction || jurisdiction.jurisdiction.trim().length === 0) return null;
+
+  const check = verifySectionExcerptEvidence(
+    jurisdiction.sectionOrderIndex,
+    jurisdiction.sourceText,
+    sectionsByOrder,
+    chunksBySectionId,
+    options
+  );
+  if (!check.isValid || !check.targetSection) return null;
 
   return {
     jurisdiction: jurisdiction.jurisdiction.trim(),
-    sourceText: jurisdiction.sourceText.trim(),
-    sectionId: targetSec.id,
-    sectionOrderIndex: targetSec.orderIndex,
+    sourceText: check.cleanSourceText,
+    sectionId: check.targetSection.id,
+    sectionOrderIndex: check.targetSection.orderIndex,
   };
 }
 
 /**
- * Validates an important date against document sections.
+ * Validates an important date against document sections (Slice 3.3 / 3.5).
  * Returns ValidatedDate if valid, or null if invalid.
  */
 export function validateDateEvidence(
   date: RawAiDate,
-  sectionsByOrder: Map<number, IntelligenceInputSection>
+  sectionsByOrder: Map<number, IntelligenceInputSection>,
+  chunksBySectionId?: Map<string, IntelligenceInputChunk[]>,
+  options?: { expectedDocumentId?: string }
 ): ValidatedDate | null {
-  const targetSec = sectionsByOrder.get(date.sectionOrderIndex);
-  if (!targetSec) return null;
-  if (!isExcerptInContent(targetSec.content, date.sourceText)) return null;
+  if (!date.dateValue || date.dateValue.trim().length === 0) return null;
+
+  const check = verifySectionExcerptEvidence(
+    date.sectionOrderIndex,
+    date.sourceText,
+    sectionsByOrder,
+    chunksBySectionId,
+    options
+  );
+  if (!check.isValid || !check.targetSection) return null;
 
   return {
     dateValue: date.dateValue.trim(),
     dateType: date.dateType.trim(),
     description: date.description.trim(),
-    sourceText: date.sourceText.trim(),
-    sectionId: targetSec.id,
-    sectionOrderIndex: targetSec.orderIndex,
+    sourceText: check.cleanSourceText,
+    sectionId: check.targetSection.id,
+    sectionOrderIndex: check.targetSection.orderIndex,
   };
 }
 
 /**
- * Validates a financial term against document sections.
+ * Validates a financial term against document sections (Slice 3.3 / 3.5).
  * Returns ValidatedFinancialTerm if valid, or null if invalid.
  */
 export function validateFinancialTermEvidence(
   term: RawAiFinancialTerm,
-  sectionsByOrder: Map<number, IntelligenceInputSection>
+  sectionsByOrder: Map<number, IntelligenceInputSection>,
+  chunksBySectionId?: Map<string, IntelligenceInputChunk[]>,
+  options?: { expectedDocumentId?: string }
 ): ValidatedFinancialTerm | null {
-  const targetSec = sectionsByOrder.get(term.sectionOrderIndex);
-  if (!targetSec) return null;
-  if (!isExcerptInContent(targetSec.content, term.sourceText)) return null;
+  if (!term.amount || term.amount.trim().length === 0) return null;
+
+  const check = verifySectionExcerptEvidence(
+    term.sectionOrderIndex,
+    term.sourceText,
+    sectionsByOrder,
+    chunksBySectionId,
+    options
+  );
+  if (!check.isValid || !check.targetSection) return null;
 
   return {
     amount: term.amount.trim(),
     currency: term.currency?.trim() || null,
     frequency: term.frequency?.trim() || null,
     description: term.description.trim(),
-    sourceText: term.sourceText.trim(),
-    sectionId: targetSec.id,
-    sectionOrderIndex: targetSec.orderIndex,
+    sourceText: check.cleanSourceText,
+    sectionId: check.targetSection.id,
+    sectionOrderIndex: check.targetSection.orderIndex,
   };
 }
 
 /**
- * Validates an important section against document sections.
+ * Validates an important section against document sections (Slice 3.3 / 3.5).
  * Returns ValidatedImportantSection if valid, or null if invalid.
  */
 export function validateImportantSectionEvidence(
   sec: RawAiImportantSection,
-  sectionsByOrder: Map<number, IntelligenceInputSection>
+  sectionsByOrder: Map<number, IntelligenceInputSection>,
+  options?: { expectedDocumentId?: string }
 ): ValidatedImportantSection | null {
+  if (
+    typeof sec.sectionOrderIndex !== "number" ||
+    sec.sectionOrderIndex < 0 ||
+    !Number.isInteger(sec.sectionOrderIndex)
+  ) {
+    return null;
+  }
   const targetSec = sectionsByOrder.get(sec.sectionOrderIndex);
   if (!targetSec) return null;
+
+  if (
+    options?.expectedDocumentId &&
+    targetSec.documentId &&
+    targetSec.documentId !== options.expectedDocumentId
+  ) {
+    return null;
+  }
 
   return {
     sectionId: targetSec.id,
@@ -548,10 +746,23 @@ export function validateStructuredExtractionEvidence(
     sectionsByOrder.set(sec.orderIndex, sec);
   }
 
+  const chunksBySectionId = new Map<string, IntelligenceInputChunk[]>();
+  if (options?.chunks) {
+    for (const chk of options.chunks) {
+      const list = chunksBySectionId.get(chk.sectionId) ?? [];
+      list.push(chk);
+      chunksBySectionId.set(chk.sectionId, list);
+    }
+  }
+
+  const checkOptions = options?.documentId
+    ? { expectedDocumentId: options.documentId }
+    : undefined;
+
   // 1. Validate Parties
   const validatedParties: ValidatedParty[] = [];
   for (const p of raw.parties) {
-    const validated = validatePartyEvidence(p, sectionsByOrder);
+    const validated = validatePartyEvidence(p, sectionsByOrder, chunksBySectionId, checkOptions);
     if (validated) {
       validatedParties.push(validated);
     } else if (options?.strict) {
@@ -564,7 +775,7 @@ export function validateStructuredExtractionEvidence(
   // 2. Validate Governing Law
   let validatedGoverningLaw: ValidatedGoverningLaw | null = null;
   if (raw.governingLaw) {
-    const validated = validateGoverningLawEvidence(raw.governingLaw, sectionsByOrder);
+    const validated = validateGoverningLawEvidence(raw.governingLaw, sectionsByOrder, chunksBySectionId, checkOptions);
     if (validated) {
       validatedGoverningLaw = validated;
     } else if (options?.strict) {
@@ -577,7 +788,7 @@ export function validateStructuredExtractionEvidence(
   // 3. Validate Jurisdiction
   let validatedJurisdiction: ValidatedJurisdiction | null = null;
   if (raw.jurisdiction) {
-    const validated = validateJurisdictionEvidence(raw.jurisdiction, sectionsByOrder);
+    const validated = validateJurisdictionEvidence(raw.jurisdiction, sectionsByOrder, chunksBySectionId, checkOptions);
     if (validated) {
       validatedJurisdiction = validated;
     } else if (options?.strict) {
@@ -590,7 +801,7 @@ export function validateStructuredExtractionEvidence(
   // 4. Validate Important Dates
   const validatedDates: ValidatedDate[] = [];
   for (const d of raw.importantDates) {
-    const validated = validateDateEvidence(d, sectionsByOrder);
+    const validated = validateDateEvidence(d, sectionsByOrder, chunksBySectionId, checkOptions);
     if (validated) {
       validatedDates.push(validated);
     } else if (options?.strict) {
@@ -603,7 +814,7 @@ export function validateStructuredExtractionEvidence(
   // 5. Validate Financial Terms
   const validatedFinancialTerms: ValidatedFinancialTerm[] = [];
   for (const f of raw.financialTerms) {
-    const validated = validateFinancialTermEvidence(f, sectionsByOrder);
+    const validated = validateFinancialTermEvidence(f, sectionsByOrder, chunksBySectionId, checkOptions);
     if (validated) {
       validatedFinancialTerms.push(validated);
     } else if (options?.strict) {
@@ -616,7 +827,7 @@ export function validateStructuredExtractionEvidence(
   // 6. Validate Important Sections
   const validatedImportantSections: ValidatedImportantSection[] = [];
   for (const s of raw.importantSections) {
-    const validated = validateImportantSectionEvidence(s, sectionsByOrder);
+    const validated = validateImportantSectionEvidence(s, sectionsByOrder, checkOptions);
     if (validated) {
       validatedImportantSections.push(validated);
     } else if (options?.strict) {
@@ -702,43 +913,29 @@ export function validateFindingEvidence(
     };
   }
 
-  // Substantive finding validation
-  const sectionIndex = finding.sectionOrderIndex;
-  if (sectionIndex === null || sectionIndex === undefined) {
-    return null;
-  }
-
-  const targetSection = sectionsByOrder.get(sectionIndex);
-  if (!targetSection) {
-    return null;
-  }
-
-  if (!finding.sourceText || finding.sourceText.trim().length === 0) {
-    return null;
-  }
-
-  if (!isExcerptInContent(targetSection.content, finding.sourceText)) {
-    return null;
-  }
-
-  // Correlate to specific chunk if chunks are provided
-  const sectionChunks = chunksBySectionId?.get(targetSection.id) ?? [];
-  const { chunkId, pageNumber } = findMatchingChunk(
-    sectionChunks,
+  // Substantive finding validation via unified core primitive (Slice 3.5)
+  const check = verifySectionExcerptEvidence(
+    finding.sectionOrderIndex,
     finding.sourceText,
-    targetSection.pageStart
+    sectionsByOrder,
+    chunksBySectionId,
+    documentId ? { expectedDocumentId: documentId } : undefined
   );
+
+  if (!check.isValid || !check.targetSection) {
+    return null;
+  }
 
   return {
     documentId,
-    sectionId: targetSection.id,
-    chunkId,
+    sectionId: check.targetSection.id,
+    chunkId: check.chunkId,
     findingType: finding.findingType,
     importance: finding.importance,
     label: finding.label.trim(),
     summary: finding.summary.trim(),
-    sourceText: finding.sourceText.trim(),
-    pageNumber,
+    sourceText: check.cleanSourceText,
+    pageNumber: check.pageNumber,
     metadata: finding.metadata ?? null,
   };
 }

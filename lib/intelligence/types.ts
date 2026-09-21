@@ -49,6 +49,7 @@ export interface IntelligenceInputSection {
   content: string;
   pageStart: number | null;
   pageEnd: number | null;
+  documentId?: string;
 }
 
 /** Minimal persisted chunk representation supplied for RAG traceability */
@@ -58,6 +59,7 @@ export interface IntelligenceInputChunk {
   chunkIndex: number;
   content: string;
   pageNumber: number | null;
+  documentId?: string;
 }
 
 /** Complete input payload passed to the intelligence engine */

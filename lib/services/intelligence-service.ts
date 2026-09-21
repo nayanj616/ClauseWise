@@ -54,6 +54,7 @@ import {
   validateStructuredExtractionEvidence,
   validateFindingEvidence,
   validateFindingsListEvidence,
+  EvidenceValidationError,
   ClassificationEvidenceValidationError,
   StructuredExtractionValidationError,
   FindingEvidenceValidationError,
@@ -165,6 +166,7 @@ export async function analyzeDocumentIntelligence(
     pageCount: doc.pageCount,
     sections: persistedSections.map((s) => ({
       id: s.id,
+      documentId: s.documentId,
       orderIndex: s.orderIndex,
       title: s.title,
       content: s.content,
@@ -173,6 +175,7 @@ export async function analyzeDocumentIntelligence(
     })),
     chunks: persistedChunks.map((c) => ({
       id: c.id,
+      documentId: c.documentId,
       sectionId: c.sectionId,
       chunkIndex: c.chunkIndex,
       content: c.content,
@@ -260,7 +263,7 @@ export async function analyzeDocumentIntelligence(
 export async function classifyDocumentContent(
   sections: IntelligenceInputSection[],
   metadata: { filename: string; pageCount: number | null },
-  options?: { allowFallbackToGeneral?: boolean }
+  options?: { allowFallbackToGeneral?: boolean; expectedDocumentId?: string }
 ): Promise<ValidatedClassification> {
   if (!sections || sections.length === 0) {
     throw new IntelligenceValidationError(
@@ -298,9 +301,10 @@ export async function classifyDocumentContent(
   try {
     return validateClassificationEvidence(rawClassification, sections, {
       allowFallbackToGeneral: options?.allowFallbackToGeneral ?? true,
+      expectedDocumentId: options?.expectedDocumentId,
     });
   } catch (valError) {
-    if (valError instanceof ClassificationEvidenceValidationError) {
+    if (valError instanceof EvidenceValidationError) {
       throw new IntelligenceValidationError(valError.message, { cause: valError });
     }
     throw valError;
@@ -345,6 +349,7 @@ export async function classifyDocument(
 
   const inputSections: IntelligenceInputSection[] = persistedSections.map((s) => ({
     id: s.id,
+    documentId: s.documentId,
     orderIndex: s.orderIndex,
     title: s.title,
     content: s.content,
@@ -358,7 +363,10 @@ export async function classifyDocument(
       filename: doc.originalFilename,
       pageCount: doc.pageCount,
     },
-    options
+    {
+      ...options,
+      expectedDocumentId: cleanDocId,
+    }
   );
 }
 
@@ -524,7 +532,7 @@ export async function extractDocumentContent(
   try {
     return validateStructuredExtractionEvidence(rawExtraction, sections, options);
   } catch (valError) {
-    if (valError instanceof StructuredExtractionValidationError) {
+    if (valError instanceof EvidenceValidationError) {
       throw new IntelligenceValidationError(valError.message, { cause: valError });
     }
     throw valError;
@@ -569,6 +577,7 @@ export async function extractDocumentMetadata(
 
   const inputSections: IntelligenceInputSection[] = persistedSections.map((s) => ({
     id: s.id,
+    documentId: s.documentId,
     orderIndex: s.orderIndex,
     title: s.title,
     content: s.content,
@@ -582,7 +591,10 @@ export async function extractDocumentMetadata(
       filename: doc.originalFilename,
       pageCount: doc.pageCount,
     },
-    options
+    {
+      ...options,
+      documentId: cleanDocId,
+    }
   );
 }
 
@@ -766,7 +778,7 @@ export async function generateFindingsContent(
       options
     );
   } catch (valError) {
-    if (valError instanceof FindingEvidenceValidationError) {
+    if (valError instanceof EvidenceValidationError) {
       throw new IntelligenceValidationError(valError.message, { cause: valError });
     }
     throw valError;
@@ -841,6 +853,7 @@ export async function generateDocumentFindings(
 
   const inputSections: IntelligenceInputSection[] = persistedSections.map((s) => ({
     id: s.id,
+    documentId: s.documentId,
     orderIndex: s.orderIndex,
     title: s.title,
     content: s.content,
@@ -850,6 +863,7 @@ export async function generateDocumentFindings(
 
   const inputChunks: IntelligenceInputChunk[] = persistedChunks.map((c) => ({
     id: c.id,
+    documentId: c.documentId,
     sectionId: c.sectionId,
     chunkIndex: c.chunkIndex,
     content: c.content,
