@@ -153,6 +153,21 @@ export const RawAiImportantSectionSchema = z
   .strict();
 
 /**
+ * Supported document categories established by the Phase 3 contract.
+ */
+export const SUPPORTED_DOCUMENT_TYPES = [
+  "nda",
+  "employment_agreement",
+  "lease_agreement",
+  "service_agreement",
+  "commercial_contract",
+  "general",
+] as const;
+
+export type SupportedDocumentType = (typeof SUPPORTED_DOCUMENT_TYPES)[number];
+export const SupportedDocumentTypeSchema = z.enum(SUPPORTED_DOCUMENT_TYPES);
+
+/**
  * Document type classification with explicit provenance:
  * either stated directly in document text (with evidence) or inferred with explicit reason.
  */

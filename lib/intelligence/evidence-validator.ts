@@ -25,8 +25,36 @@ import type {
   ValidatedImportantSection,
   ValidatedClassification,
 } from "./types";
-import type { RawAiIntelligenceResponse } from "./schemas";
-import { isExpectedTopicAllowed } from "./expectation-catalog";
+import {
+  type RawAiIntelligenceResponse,
+  type RawAiClassification,
+  SUPPORTED_DOCUMENT_TYPES,
+  type SupportedDocumentType,
+} from "./schemas";
+import {
+  isExpectedTopicAllowed,
+  normalizeDocumentTypeKey,
+} from "./expectation-catalog";
+
+export class ClassificationEvidenceValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ClassificationEvidenceValidationError";
+  }
+}
+
+export function isSupportedDocumentType(
+  type: string | null | undefined
+): type is SupportedDocumentType {
+  if (!type || typeof type !== "string") return false;
+  return (SUPPORTED_DOCUMENT_TYPES as readonly string[]).includes(
+    type.trim().toLowerCase()
+  );
+}
+
+export interface ValidateClassificationOptions {
+  allowFallbackToGeneral?: boolean;
+}
 
 /**
  * Normalizes whitespace (collapsing multiple spaces, tabs, and newlines into single spaces)
@@ -304,4 +332,98 @@ export function validateIntelligenceEvidence(
     rejectedFindingsCount,
   };
 }
+
+/**
+ * Deterministically validates document classification and its supporting evidence
+ * against persisted document sections (Slice 3.2).
+ *
+ * Requirements:
+ * 1. Document category must belong to SUPPORTED_DOCUMENT_TYPES (or fall back to 'general' if allowed).
+ * 2. Case A (Explicitly stated):
+ *    - sourceText must be non-empty.
+ *    - sectionOrderIndex must point to an existing section.
+ *    - sourceText must be present in that section's content (exact or normalized whitespace).
+ *    - Fabricated or absent source text is rejected (ClassificationEvidenceValidationError).
+ * 3. Case B (Inferred):
+ *    - sourceText, sectionId, sectionOrderIndex must be null.
+ *    - inferenceReason must be provided.
+ */
+export function validateClassificationEvidence(
+  raw: RawAiClassification,
+  sections: IntelligenceInputSection[],
+  options?: ValidateClassificationOptions
+): ValidatedClassification {
+  const sectionsByOrder = new Map<number, IntelligenceInputSection>();
+  for (const sec of sections) {
+    sectionsByOrder.set(sec.orderIndex, sec);
+  }
+
+  // 1. Resolve and validate document category
+  const rawType = (raw.documentType || "").trim().toLowerCase();
+  let resolvedType: SupportedDocumentType;
+
+  if (isSupportedDocumentType(rawType)) {
+    resolvedType = rawType;
+  } else {
+    const normalized = normalizeDocumentTypeKey(rawType);
+    if (isSupportedDocumentType(normalized) && normalized !== "general") {
+      resolvedType = normalized;
+    } else if (options?.allowFallbackToGeneral) {
+      resolvedType = "general";
+    } else {
+      throw new ClassificationEvidenceValidationError(
+        `Unsupported document category: "${raw.documentType}". Supported categories are: ${SUPPORTED_DOCUMENT_TYPES.join(", ")}`
+      );
+    }
+  }
+
+  // 2. Validate grounding evidence
+  if (raw.isStatedInText) {
+    if (!raw.sourceText || raw.sourceText.trim().length === 0) {
+      throw new ClassificationEvidenceValidationError(
+        `Classification claims document type is stated in text, but sourceText is empty.`
+      );
+    }
+    if (typeof raw.sectionOrderIndex !== "number" || raw.sectionOrderIndex < 0) {
+      throw new ClassificationEvidenceValidationError(
+        `Classification claims document type is stated in text, but sectionOrderIndex is missing or invalid.`
+      );
+    }
+
+    const targetSection = sectionsByOrder.get(raw.sectionOrderIndex);
+    if (!targetSection) {
+      throw new ClassificationEvidenceValidationError(
+        `Classification references nonexistent section index ${raw.sectionOrderIndex}.`
+      );
+    }
+
+    if (!isExcerptInContent(targetSection.content, raw.sourceText)) {
+      throw new ClassificationEvidenceValidationError(
+        `Classification source text "${raw.sourceText.trim()}" was not found in referenced section ${raw.sectionOrderIndex}.`
+      );
+    }
+
+    return {
+      documentType: resolvedType,
+      isStatedInText: true,
+      sourceText: raw.sourceText.trim(),
+      sectionId: targetSection.id,
+      sectionOrderIndex: targetSection.orderIndex,
+      inferenceReason: raw.inferenceReason?.trim() || null,
+    };
+  }
+
+  // Case B: Inferred classification
+  return {
+    documentType: resolvedType,
+    isStatedInText: false,
+    sourceText: null,
+    sectionId: null,
+    sectionOrderIndex: null,
+    inferenceReason:
+      raw.inferenceReason?.trim() ||
+      `Classified as ${resolvedType} based on document content and structure.`,
+  };
+}
+
 
