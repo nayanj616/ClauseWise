@@ -108,6 +108,18 @@ export const RawAiFindingSchema = z.discriminatedUnion("findingType", [
 ]);
 
 /**
+ * Structured findings response container for OpenAI structured output (Slice 3.4).
+ * Bounded to a maximum of 30 findings to prevent token overflows and hallucination sprawl.
+ */
+export const RawAiFindingsResponseSchema = z
+  .object({
+    findings: z.array(RawAiFindingSchema).max(30, "Maximum of 30 findings permitted"),
+  })
+  .strict();
+
+export type RawAiFindingsResponse = z.infer<typeof RawAiFindingsResponseSchema>;
+
+/**
  * Party extracted from document text with verifiable source evidence.
  */
 export const RawAiPartySchema = z

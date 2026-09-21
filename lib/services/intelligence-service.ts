@@ -18,7 +18,9 @@ import {
   documents,
   documentSections,
   documentChunks,
+  documentFindings,
   type Document,
+  type DocumentFinding,
 } from "@/lib/db/schema";
 import {
   generateStructuredOutput,
@@ -30,8 +32,10 @@ import {
   RawAiIntelligenceResponseSchema,
   RawAiClassificationSchema,
   RawAiStructuredExtractionSchema,
+  RawAiFindingsResponseSchema,
   type RawAiClassification,
   type RawAiStructuredExtraction,
+  type RawAiFindingsResponse,
 } from "@/lib/intelligence/schemas";
 import {
   buildIntelligenceSystemPrompt,
@@ -40,23 +44,31 @@ import {
   buildClassificationUserPrompt,
   buildExtractionSystemPrompt,
   buildExtractionUserPrompt,
+  buildFindingsSystemPrompt,
+  buildFindingsUserPrompt,
   formatSectionsForIntelligence,
 } from "@/lib/intelligence/prompts";
 import {
   validateIntelligenceEvidence,
   validateClassificationEvidence,
   validateStructuredExtractionEvidence,
+  validateFindingEvidence,
+  validateFindingsListEvidence,
   ClassificationEvidenceValidationError,
   StructuredExtractionValidationError,
+  FindingEvidenceValidationError,
   type ValidateStructuredExtractionOptions,
+  type ValidateFindingsOptions,
   isSupportedDocumentType,
 } from "@/lib/intelligence/evidence-validator";
 import type {
   IntelligenceInputPayload,
   IntelligenceInputSection,
+  IntelligenceInputChunk,
   ValidatedIntelligenceResult,
   ValidatedClassification,
   ValidatedStructuredExtraction,
+  ValidatedFinding,
 } from "@/lib/intelligence/types";
 
 const UUID_REGEX =
@@ -672,6 +684,293 @@ export async function extractAndPersistDocumentMetadata(
   const updatedDoc = await persistDocumentExtraction(cleanDocId, extraction);
 
   return { document: updatedDoc, extraction };
+}
+
+// ---------------------------------------------------------------------------
+// Slice 3.4 — Document Findings Pipeline
+// ---------------------------------------------------------------------------
+
+/**
+ * Generates and validates document findings from document sections (Slice 3.4).
+ *
+ * Pipeline:
+ * Persisted Sections → formatSectionsForIntelligence → OpenAI Structured Output →
+ * Zod validation (RawAiFindingsResponseSchema) → validateFindingsListEvidence → Validated findings.
+ *
+ * Invariants:
+ * 1. The LLM is never the source of truth.
+ * 2. Every substantive finding must have verifiable sourceText in the referenced section.
+ * 3. missing_information findings must match the Core Provision Catalog for the documentType.
+ * 4. Material Completeness Guard: substantive documents (>500 chars, >=2 sections) with 0 valid
+ *    findings throw IntelligenceValidationError rather than reporting false success.
+ *
+ * @param sections - Persisted document sections
+ * @param metadata - Document metadata (filename, pageCount)
+ * @param documentType - Resolved document classification type (defaults to 'general')
+ * @param chunks - Optional persisted document chunks for retrieval correlation
+ * @param options - Validation options (strict, etc.)
+ * @returns Validated findings and rejected candidate count
+ */
+export async function generateFindingsContent(
+  sections: IntelligenceInputSection[],
+  metadata: { filename: string; pageCount: number | null },
+  documentType: string = "general",
+  chunks?: IntelligenceInputChunk[],
+  options?: ValidateFindingsOptions & { documentId?: string }
+): Promise<{ findings: ValidatedFinding[]; rejectedCount: number }> {
+  if (!sections || sections.length === 0) {
+    throw new IntelligenceValidationError(
+      "Cannot generate findings: no document sections provided."
+    );
+  }
+
+  // 1. Format sections deterministically with length bounds
+  const { formattedText } = formatSectionsForIntelligence(sections);
+
+  // 2. Build security-wrapped system and user prompts
+  const systemPrompt = buildFindingsSystemPrompt(documentType);
+  const userPrompt = buildFindingsUserPrompt(formattedText, metadata);
+
+  // 3. Request structured output from OpenAI
+  let rawFindingsResponse: RawAiFindingsResponse;
+  try {
+    rawFindingsResponse = await generateStructuredOutput<RawAiFindingsResponse>({
+      model: MODELS.CHAT,
+      temperature: TEMPERATURES.ANALYSIS,
+      maxTokens: 4096,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+      schema: RawAiFindingsResponseSchema,
+      name: "document_findings_generation",
+    });
+  } catch (error) {
+    if (error instanceof OpenAiInferenceError) {
+      throw error;
+    }
+    throw new OpenAiInferenceError(
+      `OpenAI findings inference failed: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error }
+    );
+  }
+
+  // 4. Validate evidence deterministically against persisted sections and chunks
+  let validationResult: { validatedFindings: ValidatedFinding[]; rejectedCount: number };
+  try {
+    validationResult = validateFindingsListEvidence(
+      rawFindingsResponse.findings,
+      sections,
+      documentType,
+      chunks,
+      options
+    );
+  } catch (valError) {
+    if (valError instanceof FindingEvidenceValidationError) {
+      throw new IntelligenceValidationError(valError.message, { cause: valError });
+    }
+    throw valError;
+  }
+
+  // 5. Enforce Material Failure Guard (Phase 3.0 contract invariant)
+  const totalContentLength = sections.reduce(
+    (sum, sec) => sum + (sec.content?.length ?? 0),
+    0
+  );
+
+  if (
+    sections.length >= 2 &&
+    totalContentLength > 500 &&
+    validationResult.validatedFindings.length === 0
+  ) {
+    throw new IntelligenceValidationError(
+      `Finding generation failed to identify valid, evidenced findings for document ${options?.documentId ?? "unspecified"}. All ${rawFindingsResponse.findings.length} candidate findings were rejected during evidence verification.`
+    );
+  }
+
+  return {
+    findings: validationResult.validatedFindings,
+    rejectedCount: validationResult.rejectedCount,
+  };
+}
+
+/**
+ * Loads persisted sections and chunks for documentId and generates grounded document findings (Slice 3.4).
+ *
+ * @param documentId - UUID of the target document
+ * @param options - Validation options
+ * @returns Validated findings and rejected candidate count
+ */
+export async function generateDocumentFindings(
+  documentId: string,
+  options?: ValidateFindingsOptions
+): Promise<{ findings: ValidatedFinding[]; rejectedCount: number }> {
+  assertValidDocumentId(documentId);
+  const cleanDocId = documentId.trim();
+
+  // 1. Fetch document record
+  const [doc] = await db
+    .select()
+    .from(documents)
+    .where(eq(documents.id, cleanDocId))
+    .limit(1);
+
+  if (!doc) {
+    throw new IntelligenceDocumentNotFoundError(cleanDocId);
+  }
+
+  // 2. Fetch persisted sections ordered by orderIndex
+  const persistedSections = await db
+    .select()
+    .from(documentSections)
+    .where(eq(documentSections.documentId, cleanDocId))
+    .orderBy(asc(documentSections.orderIndex));
+
+  if (!persistedSections || persistedSections.length === 0) {
+    throw new IntelligenceValidationError(
+      `Cannot generate findings for document ${cleanDocId}: no extracted sections found in database.`
+    );
+  }
+
+  // 3. Fetch persisted chunks ordered by chunkIndex for retrieval correlation
+  const persistedChunks = await db
+    .select()
+    .from(documentChunks)
+    .where(eq(documentChunks.documentId, cleanDocId))
+    .orderBy(asc(documentChunks.chunkIndex));
+
+  const inputSections: IntelligenceInputSection[] = persistedSections.map((s) => ({
+    id: s.id,
+    orderIndex: s.orderIndex,
+    title: s.title,
+    content: s.content,
+    pageStart: s.pageStart,
+    pageEnd: s.pageEnd,
+  }));
+
+  const inputChunks: IntelligenceInputChunk[] = persistedChunks.map((c) => ({
+    id: c.id,
+    sectionId: c.sectionId,
+    chunkIndex: c.chunkIndex,
+    content: c.content,
+    pageNumber: c.pageNumber,
+  }));
+
+  return await generateFindingsContent(
+    inputSections,
+    {
+      filename: doc.originalFilename,
+      pageCount: doc.pageCount,
+    },
+    doc.documentType ?? "general",
+    inputChunks,
+    {
+      ...options,
+      documentId: cleanDocId,
+    }
+  );
+}
+
+/**
+ * Persists validated document findings into PostgreSQL via Drizzle ORM (Slice 3.4).
+ *
+ * Invariants:
+ * 1. Reprocessing idempotency: wipes prior document_findings for this document before inserting.
+ * 2. Atomic transaction: deletes and inserts succeed or roll back together.
+ * 3. Authoritative references: uses database sectionId and chunkId derived during evidence validation.
+ * 4. Isolation: leaves document_sections and document_chunks 100% untouched.
+ *
+ * @param documentId - UUID of the target document
+ * @param findings - Validated findings array passing schema and evidence checks
+ * @returns Array of persisted DocumentFinding records
+ */
+export async function persistDocumentFindings(
+  documentId: string,
+  findings: ValidatedFinding[]
+): Promise<DocumentFinding[]> {
+  assertValidDocumentId(documentId);
+  const cleanDocId = documentId.trim();
+
+  try {
+    return await db.transaction(async (tx) => {
+      // 1. Verify document exists
+      const [existingDoc] = await tx
+        .select()
+        .from(documents)
+        .where(eq(documents.id, cleanDocId))
+        .limit(1);
+
+      if (!existingDoc) {
+        throw new IntelligenceDocumentNotFoundError(cleanDocId);
+      }
+
+      // 2. Delete prior findings for this document (reprocessing idempotency)
+      await tx
+        .delete(documentFindings)
+        .where(eq(documentFindings.documentId, cleanDocId));
+
+      // 3. Insert new findings if any
+      if (findings.length === 0) {
+        return [];
+      }
+
+      const findingRows = findings.map((f) => ({
+        documentId: cleanDocId,
+        sectionId: f.sectionId,
+        chunkId: f.chunkId,
+        findingType: f.findingType,
+        importance: f.importance,
+        label: f.label,
+        summary: f.summary,
+        sourceText: f.sourceText,
+        pageNumber: f.pageNumber,
+        metadata: f.metadata,
+      }));
+
+      return await tx
+        .insert(documentFindings)
+        .values(findingRows)
+        .returning();
+    });
+  } catch (error) {
+    if (error instanceof IntelligenceError) {
+      throw error;
+    }
+    throw new IntelligenceError(
+      `Failed to persist findings for document ${cleanDocId}: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error }
+    );
+  }
+}
+
+/**
+ * Executes grounded findings generation and atomically persists validated findings (Slice 3.4).
+ *
+ * Invariants:
+ * - If generation or evidence validation fails, no findings are written.
+ * - Phase 2 sections and chunks remain untouched under all conditions.
+ * - Reprocessing safely replaces previous findings without duplicates.
+ *
+ * @param documentId - UUID of the target document
+ * @param options - Validation options
+ * @returns Persisted findings and count of rejected candidate findings
+ */
+export async function generateAndPersistDocumentFindings(
+  documentId: string,
+  options?: ValidateFindingsOptions
+): Promise<{ findings: DocumentFinding[]; rejectedCount: number }> {
+  assertValidDocumentId(documentId);
+  const cleanDocId = documentId.trim();
+
+  const { findings: validatedFindings, rejectedCount } =
+    await generateDocumentFindings(cleanDocId, options);
+
+  const persistedFindings = await persistDocumentFindings(
+    cleanDocId,
+    validatedFindings
+  );
+
+  return { findings: persistedFindings, rejectedCount };
 }
 
 

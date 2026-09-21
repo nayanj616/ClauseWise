@@ -38,6 +38,7 @@ import {
   type RawAiDate,
   type RawAiFinancialTerm,
   type RawAiStructuredExtraction,
+  type RawAiFinding,
   SUPPORTED_DOCUMENT_TYPES,
   type SupportedDocumentType,
 } from "./schemas";
@@ -57,6 +58,13 @@ export class StructuredExtractionValidationError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "StructuredExtractionValidationError";
+  }
+}
+
+export class FindingEvidenceValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "FindingEvidenceValidationError";
   }
 }
 
@@ -268,74 +276,15 @@ export function validateIntelligenceEvidence(
   // ---------------------------------------------------------------------------
   // 6. Validate Findings Evidence
   // ---------------------------------------------------------------------------
-  const validatedFindings: ValidatedFinding[] = [];
-
-  for (const finding of raw.findings) {
-    if (finding.findingType === "missing_information") {
-      // Validate expectedTopic against expectation catalog for this document type
-      const topic = finding.expectedTopic;
-      if (!isExpectedTopicAllowed(validatedClassification.documentType, topic)) {
-        // Disallowed arbitrary missing provision -> reject candidate
-        rejectedFindingsCount++;
-        continue;
-      }
-
-      validatedFindings.push({
-        documentId: payload.documentId,
-        sectionId: null,
-        chunkId: null,
-        findingType: "missing_information",
-        importance: finding.importance,
-        label: finding.label.trim(),
-        summary: finding.summary.trim(),
-        sourceText: null,
-        pageNumber: null,
-        metadata: {
-          expectedTopic: finding.expectedTopic.trim(),
-          ruleBasis: finding.ruleBasis.trim(),
-          ...(finding.metadata ?? {}),
-        },
-      });
-      continue;
-    }
-
-    // Substantive finding validation
-    const sectionIndex = finding.sectionOrderIndex;
-    const targetSection = sectionsByOrder.get(sectionIndex);
-
-    if (!targetSection) {
-      // Discard: points to nonexistent section
-      rejectedFindingsCount++;
-      continue;
-    }
-
-    if (!isExcerptInContent(targetSection.content, finding.sourceText)) {
-      // Discard: sourceText does not exist in referenced section
-      rejectedFindingsCount++;
-      continue;
-    }
-
-    // Match to specific chunk if possible
-    const sectionChunks = chunksBySectionId.get(targetSection.id) ?? [];
-    const { chunkId, pageNumber } = findMatchingChunk(
-      sectionChunks,
-      finding.sourceText,
-      targetSection.pageStart
+  const { validatedFindings, rejectedCount: findingsRejectedCount } =
+    validateFindingsListEvidence(
+      raw.findings,
+      payload.sections,
+      validatedClassification.documentType,
+      payload.chunks,
+      { documentId: payload.documentId }
     );
-
-    validatedFindings.push({
-      documentId: payload.documentId,
-      sectionId: targetSection.id,
-      chunkId,
-      findingType: finding.findingType,
-      importance: finding.importance,
-      label: finding.label.trim(),
-      summary: finding.summary.trim(),
-      sourceText: finding.sourceText.trim(),
-      pageNumber,
-      metadata: finding.metadata ?? null,
-    });
-  }
+  rejectedFindingsCount += findingsRejectedCount;
 
   return {
     documentId: payload.documentId,
@@ -685,6 +634,185 @@ export function validateStructuredExtractionEvidence(
     financialTerms: validatedFinancialTerms,
     importantSections: validatedImportantSections,
   };
+}
+
+/**
+ * Options for validating document findings evidence (Slice 3.4).
+ */
+export interface ValidateFindingsOptions {
+  strict?: boolean;
+}
+
+/**
+ * Validates a single AI finding candidate against persisted document sections and chunks (Slice 3.4).
+ *
+ * Invariants:
+ * 1. Substantive findings ('key_term', 'attention', 'obligation', 'ambiguity', 'date', 'financial_term', 'inconsistency'):
+ *    - Must reference a valid sectionIndex present in sectionsByOrder.
+ *    - Must provide non-empty sourceText.
+ *    - sourceText must exist in the referenced section (exact or whitespace-normalized).
+ *    - Resolves authoritative sectionId from persisted section.
+ *    - Correlates with specific chunkId and pageNumber if chunks are provided.
+ * 2. Missing information findings ('missing_information'):
+ *    - sourceText must be null or empty (absent content does not receive fabricated source text).
+ *    - sectionOrderIndex must be null (do not attach an unrelated section to absent content).
+ *    - expectedTopic must be grounded in the Core Provision Catalog for the documentType.
+ *    - ruleBasis must be provided.
+ *
+ * Returns ValidatedFinding if valid, or null if candidate fails evidence checks.
+ */
+export function validateFindingEvidence(
+  finding: RawAiFinding,
+  sectionsByOrder: Map<number, IntelligenceInputSection>,
+  documentType: string = "general",
+  chunksBySectionId?: Map<string, IntelligenceInputChunk[]>,
+  documentId: string = ""
+): ValidatedFinding | null {
+  if (finding.findingType === "missing_information") {
+    // Invariant: absent content must not have fabricated source text
+    if (finding.sourceText && finding.sourceText.trim().length > 0) {
+      return null;
+    }
+    // Invariant: do not attach an unrelated section to absent content
+    if (finding.sectionOrderIndex !== null && finding.sectionOrderIndex !== undefined) {
+      return null;
+    }
+
+    // Validate expectedTopic against expectation catalog for this document type
+    const topic = finding.expectedTopic;
+    if (!isExpectedTopicAllowed(documentType, topic)) {
+      return null;
+    }
+
+    return {
+      documentId,
+      sectionId: null,
+      chunkId: null,
+      findingType: "missing_information",
+      importance: finding.importance,
+      label: finding.label.trim(),
+      summary: finding.summary.trim(),
+      sourceText: null,
+      pageNumber: null,
+      metadata: {
+        expectedTopic: finding.expectedTopic.trim(),
+        ruleBasis: finding.ruleBasis.trim(),
+        ...(finding.metadata ?? {}),
+      },
+    };
+  }
+
+  // Substantive finding validation
+  const sectionIndex = finding.sectionOrderIndex;
+  if (sectionIndex === null || sectionIndex === undefined) {
+    return null;
+  }
+
+  const targetSection = sectionsByOrder.get(sectionIndex);
+  if (!targetSection) {
+    return null;
+  }
+
+  if (!finding.sourceText || finding.sourceText.trim().length === 0) {
+    return null;
+  }
+
+  if (!isExcerptInContent(targetSection.content, finding.sourceText)) {
+    return null;
+  }
+
+  // Correlate to specific chunk if chunks are provided
+  const sectionChunks = chunksBySectionId?.get(targetSection.id) ?? [];
+  const { chunkId, pageNumber } = findMatchingChunk(
+    sectionChunks,
+    finding.sourceText,
+    targetSection.pageStart
+  );
+
+  return {
+    documentId,
+    sectionId: targetSection.id,
+    chunkId,
+    findingType: finding.findingType,
+    importance: finding.importance,
+    label: finding.label.trim(),
+    summary: finding.summary.trim(),
+    sourceText: finding.sourceText.trim(),
+    pageNumber,
+    metadata: finding.metadata ?? null,
+  };
+}
+
+/**
+ * Deterministically validates a list of raw AI findings against persisted document sections and chunks (Slice 3.4).
+ *
+ * Invariants:
+ * 1. The LLM is never the source of truth.
+ * 2. Every substantive finding must have verifiable sourceText in the referenced section.
+ * 3. missing_information findings must match the Core Provision Catalog.
+ * 4. Fabricated, ungrounded, or mismatched citations are rejected before persistence.
+ * 5. In strict mode, an ungrounded finding throws FindingEvidenceValidationError.
+ *
+ * @param rawFindings - Array of raw AI findings
+ * @param sections - Persisted document sections
+ * @param documentType - Resolved document classification type
+ * @param chunks - Optional persisted document chunks for retrieval correlation
+ * @param options - Validation options (strict mode, documentId)
+ * @returns Object with validated findings array and count of rejected candidate findings
+ */
+export function validateFindingsListEvidence(
+  rawFindings: RawAiFinding[],
+  sections: IntelligenceInputSection[],
+  documentType: string = "general",
+  chunks?: IntelligenceInputChunk[],
+  options?: ValidateFindingsOptions & { documentId?: string }
+): { validatedFindings: ValidatedFinding[]; rejectedCount: number } {
+  const sectionsByOrder = new Map<number, IntelligenceInputSection>();
+  for (const sec of sections) {
+    sectionsByOrder.set(sec.orderIndex, sec);
+  }
+
+  const chunksBySectionId = new Map<string, IntelligenceInputChunk[]>();
+  if (chunks) {
+    for (const chunk of chunks) {
+      const existing = chunksBySectionId.get(chunk.sectionId) ?? [];
+      existing.push(chunk);
+      chunksBySectionId.set(chunk.sectionId, existing);
+    }
+  }
+
+  const docId = options?.documentId ?? "";
+  const validatedFindings: ValidatedFinding[] = [];
+  let rejectedCount = 0;
+
+  for (const rawFinding of rawFindings) {
+    const validated = validateFindingEvidence(
+      rawFinding,
+      sectionsByOrder,
+      documentType,
+      chunksBySectionId,
+      docId
+    );
+
+    if (validated) {
+      validatedFindings.push(validated);
+    } else {
+      rejectedCount++;
+      if (options?.strict) {
+        if (rawFinding.findingType === "missing_information") {
+          throw new FindingEvidenceValidationError(
+            `Missing information finding "${rawFinding.label}" has invalid expected topic "${rawFinding.expectedTopic}" for document type "${documentType}", or provided disallowed sourceText/sectionOrderIndex.`
+          );
+        } else {
+          throw new FindingEvidenceValidationError(
+            `Substantive finding "${rawFinding.label}" (${rawFinding.findingType}) failed evidence verification: section index ${rawFinding.sectionOrderIndex} does not exist or sourceText was not found in section content.`
+          );
+        }
+      }
+    }
+  }
+
+  return { validatedFindings, rejectedCount };
 }
 
 

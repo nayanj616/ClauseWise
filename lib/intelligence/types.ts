@@ -20,6 +20,7 @@ import type {
   RawAiDate,
   RawAiFinancialTerm,
   RawAiStructuredExtraction,
+  RawAiFindingsResponse,
 } from "./schemas";
 
 export type {
@@ -27,6 +28,7 @@ export type {
   FindingImportance,
   RawAiIntelligenceResponse,
   RawAiFinding,
+  RawAiFindingsResponse,
   SubstantiveAiFinding,
   MissingInfoAiFinding,
   RawAiParty,
