@@ -8,8 +8,10 @@ import {
   FileQuestion,
   MapPin,
   ChevronRight,
+  ArrowRight,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type {
   DocumentFinding,
@@ -21,6 +23,7 @@ export interface FindingCardProps {
   finding: DocumentFinding;
   isSelected: boolean;
   onSelect: () => void;
+  onViewInDocument?: (finding: DocumentFinding) => void;
   sectionTitle?: string;
   className?: string;
 }
@@ -61,6 +64,7 @@ export function FindingCard({
   finding,
   isSelected,
   onSelect,
+  onViewInDocument,
   sectionTitle,
   className,
 }: FindingCardProps) {
@@ -70,12 +74,19 @@ export function FindingCard({
   const isMissing = finding.findingType === "missing_information";
 
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       aria-pressed={isSelected}
       onClick={onSelect}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onSelect();
+        }
+      }}
       className={cn(
-        "w-full text-left rounded-xl border p-4 transition-all flex flex-col justify-between gap-3 group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        "w-full text-left rounded-xl border p-4 transition-all flex flex-col justify-between gap-3 group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring cursor-pointer select-none",
         isSelected
           ? "border-primary bg-primary/[0.04] shadow-sm ring-1 ring-primary/30"
           : "border-border/80 bg-card hover:bg-muted/40 hover:border-border",
@@ -122,25 +133,45 @@ export function FindingCard({
       </div>
 
       {/* Location / Provenance Footer */}
-      <div className="flex items-center justify-between text-[11px] text-muted-foreground pt-2 border-t border-border/50 w-full">
+      <div className="flex items-center justify-between text-[11px] text-muted-foreground pt-2 border-t border-border/50 w-full gap-2">
         {isMissing ? (
           <span className="flex items-center gap-1 text-amber-700 dark:text-amber-400 font-medium">
             <FileQuestion size={12} aria-hidden="true" />
             <span>Absence in document</span>
           </span>
         ) : (
-          <span className="flex items-center gap-1 truncate" title={sectionTitle || "Referenced Section"}>
-            <MapPin size={12} aria-hidden="true" className="shrink-0 text-muted-foreground" />
-            <span className="truncate">{sectionTitle || "Section"}</span>
-          </span>
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span className="flex items-center gap-1 truncate" title={sectionTitle || "Referenced Section"}>
+              <MapPin size={12} aria-hidden="true" className="shrink-0 text-muted-foreground" />
+              <span className="truncate">{sectionTitle || "Section"}</span>
+            </span>
+            {typeof finding.pageNumber === "number" && finding.pageNumber > 0 && (
+              <span className="font-mono text-muted-foreground shrink-0">
+                {`• p. ${finding.pageNumber}`}
+              </span>
+            )}
+          </div>
         )}
 
-        {!isMissing && typeof finding.pageNumber === "number" && finding.pageNumber > 0 && (
-          <span className="font-mono text-muted-foreground shrink-0 pl-2">
-            {`p. ${finding.pageNumber}`}
-          </span>
+        {/* View in Document action for substantive findings with evidence */}
+        {!isMissing && finding.sourceText && finding.sectionId && onViewInDocument && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={(e) => {
+              e.stopPropagation();
+              onViewInDocument(finding);
+            }}
+            className="h-6 text-[11px] text-primary hover:text-primary hover:bg-primary/10 px-2 py-0 gap-1 font-medium shrink-0"
+            aria-label={`View finding "${finding.label}" in document`}
+            data-testid={`finding-view-in-doc-${finding.id}`}
+          >
+            <span>View in document</span>
+            <ArrowRight size={11} aria-hidden="true" />
+          </Button>
         )}
       </div>
-    </button>
+    </div>
   );
 }

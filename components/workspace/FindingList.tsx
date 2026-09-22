@@ -17,6 +17,7 @@ export interface FindingListProps {
   findings: DocumentFinding[];
   selectedFindingId: string | null;
   onSelectFinding: (finding: DocumentFinding) => void;
+  onViewInDocument?: (finding: DocumentFinding) => void;
   sectionsById?: Map<string, WorkspaceSection>;
   className?: string;
 }
@@ -25,6 +26,7 @@ export function FindingList({
   findings,
   selectedFindingId,
   onSelectFinding,
+  onViewInDocument,
   sectionsById,
   className,
 }: FindingListProps) {
@@ -210,6 +212,7 @@ export function FindingList({
                 finding={finding}
                 isSelected={isSelected}
                 onSelect={() => onSelectFinding(finding)}
+                onViewInDocument={onViewInDocument}
                 sectionTitle={sectionTitle}
               />
             );

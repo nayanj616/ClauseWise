@@ -134,6 +134,21 @@ function SectionContentRenderer({
   );
 }
 
+/**
+ * Programmatically scrolls an element into view and focuses it without disrupting tab order.
+ * Returns true if the element was successfully scrolled/focused, false if element is null.
+ */
+export function scrollAndFocusHighlight(el: HTMLElement | null): boolean {
+  if (!el) return false;
+  if (typeof el.scrollIntoView === "function") {
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+  if (typeof el.focus === "function") {
+    el.focus({ preventScroll: true });
+  }
+  return true;
+}
+
 export function DocumentViewer({
   document,
   sections,
@@ -165,6 +180,28 @@ export function DocumentViewer({
   const highlightSegments = React.useMemo(() => {
     return getHighlightSegments(activeSection?.content, highlightExcerpt);
   }, [activeSection?.content, highlightExcerpt]);
+
+  // Ref for the active evidence highlight element
+  const internalHighlightRef = React.useRef<HTMLElement | null>(null);
+
+  // Merged ref handler for both internal scroll/focus and optional external highlightRef
+  const setMergedHighlightRef = React.useCallback(
+    (node: HTMLElement | null) => {
+      internalHighlightRef.current = node;
+      if (typeof highlightRef === "function") {
+        highlightRef(node);
+      } else if (highlightRef && typeof highlightRef === "object" && "current" in highlightRef) {
+        (highlightRef as React.MutableRefObject<HTMLElement | null>).current = node;
+      }
+    },
+    [highlightRef]
+  );
+
+  // Focus and scroll active evidence highlight into view when excerpt or section changes
+  React.useEffect(() => {
+    if (!highlightExcerpt || !highlightSegments.hasMatch) return;
+    scrollAndFocusHighlight(internalHighlightRef.current);
+  }, [highlightExcerpt, safeIndex, highlightSegments.hasMatch]);
 
   const hasMultipleSections = sections.length > 1;
   const docFormat = formatMimeType(document.mimeType, document.filename);
@@ -269,7 +306,7 @@ export function DocumentViewer({
             <SectionContentRenderer
               segments={highlightSegments}
               content={activeSection.content}
-              highlightRef={highlightRef}
+              highlightRef={setMergedHighlightRef}
             />
           </div>
         </main>
@@ -366,7 +403,7 @@ export function DocumentViewer({
               <SectionContentRenderer
                 segments={highlightSegments}
                 content={activeSection.content}
-                highlightRef={highlightRef}
+                highlightRef={setMergedHighlightRef}
               />
             </div>
 

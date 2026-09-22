@@ -61,6 +61,9 @@ export function DocumentWorkspace({
   // Selected section index state for document viewer
   const [selectedSectionIndex, setSelectedSectionIndex] = React.useState<number>(0);
 
+  // Active evidence excerpt to highlight in DocumentViewer (Phase 4 Slice 4.3)
+  const [activeEvidenceExcerpt, setActiveEvidenceExcerpt] = React.useState<string | null>(null);
+
   // Map sections by id for fast lookups
   const sectionsById = React.useMemo(() => {
     const map = new Map<string, WorkspaceSection>();
@@ -92,7 +95,42 @@ export function DocumentWorkspace({
     (extraction.importantSections as ValidatedImportantSection[] | undefined) ||
     [];
 
-  // Jump to section in document viewer handler
+  // Navigation handler from finding to document viewer (Phase 4 Slice 4.3)
+  const handleNavigateToEvidence = React.useCallback(
+    (finding: DocumentFinding | null | undefined) => {
+      if (!finding) return;
+
+      // Invariant: Substantive finding with genuine evidence
+      if (
+        finding.findingType === "missing_information" ||
+        !finding.sourceText ||
+        !finding.sectionId
+      ) {
+        return;
+      }
+
+      // Identify target section
+      const targetSection = sectionsById.get(finding.sectionId);
+      if (!targetSection) {
+        return;
+      }
+
+      // 1. Select the finding
+      setSelectedFindingId(finding.id);
+
+      // 2. Select target section
+      setSelectedSectionIndex(targetSection.orderIndex);
+
+      // 3. Set active evidence excerpt for highlighting
+      setActiveEvidenceExcerpt(finding.sourceText);
+
+      // 4. Switch to Document tab
+      setActiveTab("document");
+    },
+    [sectionsById]
+  );
+
+  // Jump to section in document viewer handler (for ImportantSections)
   const handleJumpToSection = React.useCallback(
     (target: string | number | null) => {
       if (target === null || target === undefined) return;
@@ -100,11 +138,13 @@ export function DocumentWorkspace({
       if (typeof target === "number") {
         const safeIdx = Math.max(0, Math.min(target, sections.length - 1));
         setSelectedSectionIndex(safeIdx);
+        setActiveEvidenceExcerpt(null);
         setActiveTab("document");
       } else if (typeof target === "string") {
         const found = sectionsById.get(target);
         if (found) {
           setSelectedSectionIndex(found.orderIndex);
+          setActiveEvidenceExcerpt(null);
           setActiveTab("document");
         }
       }
@@ -203,6 +243,7 @@ export function DocumentWorkspace({
                   findings={findings}
                   selectedFindingId={selectedFinding?.id || null}
                   onSelectFinding={(f) => setSelectedFindingId(f.id)}
+                  onViewInDocument={handleNavigateToEvidence}
                   sectionsById={sectionsById}
                 />
               </div>
@@ -213,6 +254,7 @@ export function DocumentWorkspace({
                   finding={selectedFinding}
                   sectionTitle={selectedFindingSectionTitle}
                   onJumpToSection={handleJumpToSection}
+                  onViewInDocument={handleNavigateToEvidence}
                 />
               </div>
             </div>
@@ -231,6 +273,7 @@ export function DocumentWorkspace({
             sections={sections}
             selectedIndex={selectedSectionIndex}
             onSelectIndex={setSelectedSectionIndex}
+            highlightExcerpt={activeEvidenceExcerpt}
             hideHeader
           />
         </main>

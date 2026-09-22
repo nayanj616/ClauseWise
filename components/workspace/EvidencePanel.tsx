@@ -24,6 +24,7 @@ export interface EvidencePanelProps {
   finding: DocumentFinding | null;
   sectionTitle?: string;
   onJumpToSection?: (sectionId: string | null) => void;
+  onViewInDocument?: (finding: DocumentFinding) => void;
   className?: string;
 }
 
@@ -31,6 +32,7 @@ export function EvidencePanel({
   finding,
   sectionTitle,
   onJumpToSection,
+  onViewInDocument,
   className,
 }: EvidencePanelProps) {
   // Empty State: No finding selected
@@ -183,8 +185,8 @@ export function EvidencePanel({
           )}
         </div>
 
-        {/* Contextual Action Button (Jump to Section in Document Text) */}
-        {!isMissing && onJumpToSection && (
+        {/* Contextual Action Button (View in Document Text) */}
+        {!isMissing && finding.sourceText && finding.sectionId && (onViewInDocument || onJumpToSection) && (
           <div className="border-t pt-4 mt-4 flex items-center justify-between">
             <span className="text-xs text-muted-foreground">
               Examine full section in context
@@ -193,7 +195,13 @@ export function EvidencePanel({
               type="button"
               variant="outline"
               size="sm"
-              onClick={() => onJumpToSection(finding.sectionId)}
+              onClick={() => {
+                if (onViewInDocument) {
+                  onViewInDocument(finding);
+                } else if (onJumpToSection) {
+                  onJumpToSection(finding.sectionId);
+                }
+              }}
               className="gap-2 text-xs text-primary hover:text-primary hover:bg-primary/10"
               aria-label={`Jump to ${sectionTitle || "section"} in document text`}
               data-testid="jump-to-section-button"
