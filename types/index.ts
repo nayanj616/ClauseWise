@@ -144,5 +144,8 @@ export {
 
 export type { IntelligencePersistenceResult } from "@/lib/services/intelligence-persistence-service";
 
+// ---------------------------------------------------------------------------
+// Document Retrieval (Phase 4)
+// ---------------------------------------------------------------------------
 
-
+export type { FindingWithEvidence } from "@/lib/services/retrieval-service";
