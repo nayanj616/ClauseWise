@@ -391,26 +391,65 @@ The LLM is **never the source of truth**. Authoritative evidence and provenance 
 
 ---
 
-## Phase 4 — Evidence-backed Analysis Display (🔜 Next Boundary)
+## Phase 4 — Evidence-backed Analysis Display (✅ Closed)
 
 **Goal:** Findings are linked to source document sections. Clicking a finding
 highlights and scrolls to the source in the document viewer.
 
-### Deliverables
+### Vertical Slices
 
-**Domain service**
-- `retrieval-service.ts` — `findingsByDocument()`, `findingsByType()`, `findingWithEvidence()`
+#### Slice 4.1 — Retrieval Domain Service (✅ Closed)
+- Implemented `lib/services/retrieval-service.ts` with strict tenant isolation:
+  - `findingsByDocument(documentId, userId)`: retrieves persisted findings ordered canonically by `pageNumber ASC NULLS LAST, createdAt ASC`.
+  - `findingsByType(documentId, findingType, userId)`: filters findings by canonical type with ownership verification.
+  - `findingWithEvidence(findingId, userId)`: resolves finding with source section and chunk evidence; preserves `section: null, chunk: null` for `missing_information`.
+  - Input validation with strict UUID regex and user ID checks.
+  - Unexpected database errors caught and re-thrown as safe `DatabaseError`.
 
-**UI**
-- Source highlight on document viewer (highlight matched section when finding selected)
-- "View in document" behavior
-- Attention items summary section
-- Important dates list with formatted dates
-- Financial terms list
+#### Slice 4.2 — Source Text Highlighting Engine (✅ Closed)
+- Pure domain utility in `lib/workspace/highlight.ts`:
+  - `findHighlightRange(sectionContent, sourceText)`: identifies exact character offsets (`startIndex`, `endIndex`, `matchedText`) without modifying the original text.
+  - `getHighlightSegments(sectionContent, sourceText)`: partitions content into `[before, highlighted, after]` segments (`before + highlighted + after === sectionContent` exactly).
+  - Whitespace-tolerant regex token matching across layout variations (newlines, multiple spaces, tabs, straight vs curly quotes).
+  - Missing-information invariant: `null`/undefined `sourceText` returns `hasMatch: false, range: null` deterministically (zero fabricated highlights).
+- DocumentViewer integration: renders `<mark id="active-evidence-highlight">` with accessibility styles and focus management.
 
-**Tests**
-- Unit: source reference mapping (finding → section → page)
-- E2E: click a finding → document scrolls to correct section and highlights it
+#### Slice 4.3 — Finding-to-Viewer Navigation (✅ Closed)
+- Cross-panel navigation coordinator in `components/workspace/DocumentWorkspace.tsx`:
+  - `handleNavigateToEvidence(finding)`: selects target section, sets active evidence excerpt, and activates `document` tab.
+  - `FindingCard`: accessible "View in document" button for substantive findings with evidence; suppressed for `missing_information`.
+  - `EvidencePanel`: "View in Document Text" action button wiring.
+  - `DocumentViewer`: `scrollAndFocusHighlight()` brings active `<mark>` into viewport and programmatically focuses it.
+
+#### Slice 4.4 — Dedicated Attention Items, Dates, and Financial Terms Linked Views (✅ Closed)
+- Presentation components surfacing existing persisted findings without modifying intelligence pipeline:
+  - `AttentionItemsSummary`: surfaces items where `importance === "needs_attention"`.
+  - `FormattedDatesList`: surfaces items where `findingType === "date"`.
+  - `FormattedFinancialList`: surfaces items where `findingType === "financial_term"`.
+  - Pure formatters in `lib/workspace/formatters.ts`: `formatFindingDate` and `formatFinancialTerm`.
+  - FindingCard metadata badges for date and financial values.
+
+#### Slice 4.5 — Final Phase 4 Verification & E2E Coverage (✅ Closed)
+- Comprehensive Playwright E2E browser test suite (`tests/e2e/evidence-navigation.spec.ts`):
+  - Complete user journey: FindingCard -> "View in document" -> Document tab -> section -> `<mark>` highlight -> focus.
+  - EvidencePanel "View in Document Text" navigation path.
+  - Attention Items, Dates, and Financial Terms linked views & navigation in browser.
+  - Missing-information truthfulness invariant verified in browser (visible absence, no fake excerpts, no navigation button).
+  - Multiple findings navigation and isolation regression.
+  - Manual document navigation regression.
+  - Status-state handling regressions (processing, error, empty, not-found).
+  - Accessibility & security verification (keyboard interaction, focus management, prominent legal disclaimer).
+- Dedicated cross-slice unit/integration verification suite (`tests/unit/phase4-final-verification.test.tsx`).
+
+### Phase 4 Final Verification Status:
+```text
+- 29 unit/integration test files passing (521 tests, 100% green)
+- 2 Playwright E2E test files passing (25 browser tests, 100% green)
+- TypeScript strict check: 0 errors (npx tsc --noEmit)
+- ESLint: 0 warnings/errors (pnpm lint)
+- Next.js Production Build: PASS (pnpm build)
+- Repository cleanliness & size: PASS (well under 10 MB limit)
+```
 
 ---
 

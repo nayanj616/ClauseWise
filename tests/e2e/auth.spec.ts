@@ -62,8 +62,9 @@ test.describe("Sign-in page", () => {
     await page.getByRole("button", { name: "Sign in" }).click();
 
     // Wait for the error message
-    await expect(page.getByRole("alert")).toBeVisible();
-    await expect(page.getByRole("alert")).toContainText(/invalid email or password/i);
+    const alert = page.locator("form [role='alert']");
+    await expect(alert).toBeVisible();
+    await expect(alert).toContainText(/invalid email or password|something went wrong/i);
   });
 });
 

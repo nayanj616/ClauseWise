@@ -48,10 +48,11 @@ Cover:
 
 Location: `tests/unit/`
 
-**Current Test Suite (Phase 3 Complete: 413 passing tests across 24 suites):**
+**Current Test Suite (Phase 4 Complete: 521 unit/integration tests across 29 suites + 25 Playwright E2E tests):**
 - **Phase 0 & 1 Baseline (85 tests across 7 suites):** Upload validation, client upload, upload route, document service, session, UI, and utilities.
 - **Phase 2 Extraction & Viewer (103 tests across 6 suites):** `extraction-service.test.ts`, `extraction-persistence.test.ts`, `chunking-service.test.ts`, `chunk-persistence-service.test.ts`, `document-workspace-service.test.ts`, `document-workspace-ui.test.tsx`.
 - **Phase 3 Intelligence & Workspace (225 tests across 11 suites):** `intelligence-schemas.test.ts`, `openai-client.test.ts`, `document-classification.test.ts`, `structured-extraction.test.ts`, `document-findings.test.ts`, `expectation-catalog.test.ts`, `evidence-validator.test.ts`, `intelligence-service.test.ts`, `intelligence-persistence.test.ts`, `intelligence-workspace.test.tsx`, `phase3-final-verification.test.tsx`.
+- **Phase 4 Evidence Display & Navigation (108 tests across 5 suites + 25 E2E tests):** `retrieval-service.test.ts` (19 tests), `evidence-highlighting.test.tsx` (19 tests), `document-workspace-navigation.test.tsx` (19 tests), `linked-views.test.tsx` (21 tests), `phase4-final-verification.test.tsx` (30 tests), `evidence-navigation.spec.ts` (14 Playwright tests), `auth.spec.ts` (11 Playwright tests).
 
 ### Phase 1 Detail:
 - `tests/unit/document-validation.test.ts` (34 tests):

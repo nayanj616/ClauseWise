@@ -309,6 +309,17 @@ export function DocumentWorkspace({
           />
         </main>
       )}
+
+      {/* Legal Disclaimer Footer */}
+      <footer className="text-center py-4 border-t text-xs text-muted-foreground mt-4">
+        <p>
+          ClauseWise provides document analysis for informational purposes only and is{" "}
+          <strong className="font-semibold text-foreground/80">
+            not a substitute for professional legal advice
+          </strong>
+          .
+        </p>
+      </footer>
     </div>
   );
 }
