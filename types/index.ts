@@ -149,3 +149,7 @@ export type { IntelligencePersistenceResult } from "@/lib/services/intelligence-
 // ---------------------------------------------------------------------------
 
 export type { FindingWithEvidence } from "@/lib/services/retrieval-service";
+export type {
+  HighlightRange,
+  HighlightSegments,
+} from "@/lib/workspace/highlight";

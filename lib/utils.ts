@@ -34,3 +34,10 @@ export function truncate(str: string, maxLength: number): string {
   return str.slice(0, maxLength - 1) + "…";
 }
 
+export {
+  findHighlightRange,
+  getHighlightSegments,
+  type HighlightRange,
+  type HighlightSegments,
+} from "./workspace/highlight";
+

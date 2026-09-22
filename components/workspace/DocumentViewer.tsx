@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { cn } from "@/lib/utils";
+import { cn, getHighlightSegments, type HighlightSegments } from "@/lib/utils";
 import type { WorkspaceDocument, WorkspaceSection } from "@/types";
 
 export interface DocumentViewerProps {
@@ -22,6 +22,8 @@ export interface DocumentViewerProps {
   selectedIndex?: number;
   onSelectIndex?: (index: number) => void;
   hideHeader?: boolean;
+  highlightExcerpt?: string | null;
+  highlightRef?: React.Ref<HTMLElement>;
 }
 
 /**
@@ -100,6 +102,38 @@ function getSectionDisplayTitle(section: WorkspaceSection): string {
   return `Section ${fallbackNum}`;
 }
 
+interface SectionContentRendererProps {
+  segments: HighlightSegments;
+  content: string;
+  highlightRef?: React.Ref<HTMLElement>;
+}
+
+function SectionContentRenderer({
+  segments,
+  content,
+  highlightRef,
+}: SectionContentRendererProps) {
+  if (!segments.hasMatch) {
+    return <>{content}</>;
+  }
+
+  return (
+    <>
+      {segments.before}
+      <mark
+        ref={highlightRef}
+        id="active-evidence-highlight"
+        data-testid="evidence-highlight"
+        tabIndex={-1}
+        className="bg-amber-200/80 text-foreground dark:bg-amber-900/60 dark:text-amber-100 rounded px-0.5 font-medium border-b-2 border-amber-500 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        {segments.highlighted}
+      </mark>
+      {segments.after}
+    </>
+  );
+}
+
 export function DocumentViewer({
   document,
   sections,
@@ -107,6 +141,8 @@ export function DocumentViewer({
   selectedIndex: controlledIndex,
   onSelectIndex,
   hideHeader = false,
+  highlightExcerpt,
+  highlightRef,
 }: DocumentViewerProps) {
   // Local state for active section selection (controlled or uncontrolled fallback)
   const [internalIndex, setInternalIndex] = React.useState<number>(0);
@@ -124,6 +160,11 @@ export function DocumentViewer({
   // Guard against out-of-bounds index
   const safeIndex = Math.max(0, Math.min(selectedIndex, sections.length - 1));
   const activeSection = sections[safeIndex] || sections[0];
+
+  // Resolve highlight segments for active section content
+  const highlightSegments = React.useMemo(() => {
+    return getHighlightSegments(activeSection?.content, highlightExcerpt);
+  }, [activeSection?.content, highlightExcerpt]);
 
   const hasMultipleSections = sections.length > 1;
   const docFormat = formatMimeType(document.mimeType, document.filename);
@@ -225,7 +266,11 @@ export function DocumentViewer({
           </div>
 
           <div className="whitespace-pre-wrap font-sans text-sm sm:text-base leading-relaxed text-foreground break-words pt-2">
-            {activeSection.content}
+            <SectionContentRenderer
+              segments={highlightSegments}
+              content={activeSection.content}
+              highlightRef={highlightRef}
+            />
           </div>
         </main>
       )}
@@ -318,7 +363,11 @@ export function DocumentViewer({
 
             {/* Verbatim Extracted Text */}
             <div className="whitespace-pre-wrap font-sans text-sm sm:text-base leading-relaxed text-foreground break-words min-h-[200px]">
-              {activeSection.content}
+              <SectionContentRenderer
+                segments={highlightSegments}
+                content={activeSection.content}
+                highlightRef={highlightRef}
+              />
             </div>
 
             {/* Previous / Next Section Pagination Controls */}
