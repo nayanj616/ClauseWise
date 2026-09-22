@@ -9,10 +9,12 @@ import {
   MapPin,
   ChevronRight,
   ArrowRight,
+  Calendar,
+  DollarSign,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { cn, formatFindingDate, formatFinancialTerm } from "@/lib/utils";
 import type {
   DocumentFinding,
   FindingType,
@@ -73,6 +75,17 @@ export function FindingCard({
   const ImportanceIcon = importanceInfo.icon;
   const isMissing = finding.findingType === "missing_information";
 
+  // Resolve specific date and financial metadata
+  const metadata = (finding.metadata || {}) as Record<string, unknown>;
+  const rawDate = typeof metadata.dateValue === "string" ? metadata.dateValue : null;
+  const dateDescription = typeof metadata.dateDescription === "string" ? metadata.dateDescription : null;
+  const formattedDate = formatFindingDate(rawDate);
+
+  const rawAmount = typeof metadata.amount === "string" ? metadata.amount : null;
+  const currency = typeof metadata.currency === "string" ? metadata.currency : null;
+  const frequency = typeof metadata.frequency === "string" ? metadata.frequency : null;
+  const formattedFinancial = formatFinancialTerm(rawAmount, currency, frequency);
+
   return (
     <div
       role="button"
@@ -130,6 +143,33 @@ export function FindingCard({
         <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">
           {finding.summary}
         </p>
+
+        {/* Formatted Date Metadata if present */}
+        {formattedDate && (
+          <div
+            className="flex items-center gap-1.5 text-xs font-semibold text-foreground bg-muted/60 px-2 py-1 rounded w-fit"
+            data-testid={`finding-date-badge-${finding.id}`}
+          >
+            <Calendar size={13} className="text-primary shrink-0" aria-hidden="true" />
+            <span>{formattedDate}</span>
+            {dateDescription && dateDescription !== formattedDate && (
+              <span className="text-[11px] text-muted-foreground font-normal">
+                • {dateDescription}
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* Formatted Financial Metadata if present */}
+        {formattedFinancial && (
+          <div
+            className="flex items-center gap-1.5 text-xs font-semibold text-foreground bg-muted/60 px-2 py-1 rounded w-fit"
+            data-testid={`finding-financial-badge-${finding.id}`}
+          >
+            <DollarSign size={13} className="text-emerald-600 dark:text-emerald-400 shrink-0" aria-hidden="true" />
+            <span>{formattedFinancial}</span>
+          </div>
+        )}
       </div>
 
       {/* Location / Provenance Footer */}

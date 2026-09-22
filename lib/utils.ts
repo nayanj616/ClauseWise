@@ -41,3 +41,9 @@ export {
   type HighlightSegments,
 } from "./workspace/highlight";
 
+export {
+  formatFindingDate,
+  formatFinancialTerm,
+} from "./workspace/formatters";
+
+

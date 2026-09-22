@@ -14,6 +14,9 @@ import { ImportantSections } from "./ImportantSections";
 import { FindingList } from "./FindingList";
 import { EvidencePanel } from "./EvidencePanel";
 import { DocumentViewer } from "./DocumentViewer";
+import { AttentionItemsSummary } from "./AttentionItemsSummary";
+import { FormattedDatesList } from "./FormattedDatesList";
+import { FormattedFinancialList } from "./FormattedFinancialList";
 import {
   DocumentProcessingState,
   DocumentErrorState,
@@ -206,7 +209,35 @@ export function DocumentWorkspace({
           {/* Section 1: Overview & Structured Metadata */}
           <DocumentOverview document={document} />
 
-          {/* Section 2: Important Sections Highlighted */}
+          {/* Section 2: Items Requiring Attention (Phase 4 Slice 4.4) */}
+          <AttentionItemsSummary
+            findings={findings}
+            selectedFindingId={selectedFinding?.id || null}
+            onSelectFinding={(f) => setSelectedFindingId(f.id)}
+            onViewInDocument={handleNavigateToEvidence}
+            sectionsById={sectionsById}
+          />
+
+          {/* Section 3: Important Dates & Financial Terms Grid (Phase 4 Slice 4.4) */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+            <FormattedDatesList
+              findings={findings}
+              selectedFindingId={selectedFinding?.id || null}
+              onSelectFinding={(f) => setSelectedFindingId(f.id)}
+              onViewInDocument={handleNavigateToEvidence}
+              sectionsById={sectionsById}
+            />
+
+            <FormattedFinancialList
+              findings={findings}
+              selectedFindingId={selectedFinding?.id || null}
+              onSelectFinding={(f) => setSelectedFindingId(f.id)}
+              onViewInDocument={handleNavigateToEvidence}
+              sectionsById={sectionsById}
+            />
+          </div>
+
+          {/* Section 4: Important Sections Highlighted */}
           {importantSections.length > 0 && (
             <ImportantSections
               importantSections={importantSections}
