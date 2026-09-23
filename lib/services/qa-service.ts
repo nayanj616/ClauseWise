@@ -92,6 +92,7 @@ export const AnswerQuestionInputSchema = z.object({
     .trim()
     .min(1, "Question must not be empty")
     .max(2000, "Question must not exceed 2000 characters"),
+  sectionId: z.string().uuid("Invalid section ID format").optional().nullable(),
   retrievalConfig: RetrievalConfigSchema.optional(),
   retrievalResult: z.custom<RetrievalResult>().optional(),
 });
@@ -122,6 +123,8 @@ export interface AnswerQuestionResult {
   evidenceUsed: RetrievedChunk[];
   documentId: string;
   question: string;
+  sectionId?: string | null;
+  fallbackUsed?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -132,6 +135,33 @@ export const UNTRUSTED_EVIDENCE_START = "=== UNTRUSTED DOCUMENT EVIDENCE START =
 export const UNTRUSTED_EVIDENCE_END = "=== UNTRUSTED DOCUMENT EVIDENCE END ===";
 export const INSUFFICIENT_EVIDENCE_ANSWER =
   "The document does not appear to contain sufficient information to answer this question.";
+export const INSUFFICIENT_SECTION_EVIDENCE_ANSWER =
+  "I couldn't find enough information in the selected section to answer that reliably.";
+
+export interface SectionContextPromptInfo {
+  sectionId?: string | null;
+  sectionTitle?: string | null;
+  fallbackUsed?: boolean;
+}
+
+/**
+ * Formats active section context and provenance notes for the prompt.
+ */
+export function formatSectionContext(info?: SectionContextPromptInfo): string {
+  if (!info?.sectionId) return "";
+  const titlePart = info.sectionTitle ? ` (${info.sectionTitle})` : "";
+  if (info.fallbackUsed) {
+    return `ACTIVE SECTION CONTEXT:
+Selected section: ${info.sectionId}${titlePart}
+NOTE: The selected section did not contain direct evidence for this question. Evidence was retrieved from other relevant sections of the same document. In your answer, state clearly that the answer is based on other sections of the document rather than the selected section.
+
+`;
+  }
+  return `ACTIVE SECTION CONTEXT:
+Selected section: ${info.sectionId}${titlePart}
+
+`;
+}
 
 /**
  * Constructs the system prompt with strict evidence-first and anti-hallucination instructions.
@@ -182,9 +212,14 @@ ${chunk.content}`;
 /**
  * Builds the user prompt clearly separating question from untrusted document evidence.
  */
-export function buildQaUserPrompt(question: string, chunks: RetrievedChunk[]): string {
+export function buildQaUserPrompt(
+  question: string,
+  chunks: RetrievedChunk[],
+  sectionContext?: SectionContextPromptInfo
+): string {
+  const sectionBlock = formatSectionContext(sectionContext);
   const formattedEvidence = formatEvidenceContext(chunks);
-  return `USER QUESTION:
+  return `${sectionBlock}USER QUESTION:
 ${question}
 
 ${UNTRUSTED_EVIDENCE_START}
@@ -247,6 +282,7 @@ export async function answerQuestion(
     documentId,
     userId,
     question,
+    sectionId,
     retrievalConfig,
     retrievalResult: suppliedRetrieval,
   } = parseResult.data;
@@ -305,6 +341,7 @@ export async function answerQuestion(
       documentId,
       userId,
       question,
+      sectionId,
       config: retrievalConfig,
     });
   }
@@ -315,8 +352,12 @@ export async function answerQuestion(
   // - Return explicit insufficient-evidence result.
   // - Do not fall back to general model knowledge.
   if (!retrieval.hasSufficientEvidence || retrieval.chunks.length === 0) {
+    const refusalAnswer = sectionId
+      ? INSUFFICIENT_SECTION_EVIDENCE_ANSWER
+      : INSUFFICIENT_EVIDENCE_ANSWER;
+
     return {
-      answer: INSUFFICIENT_EVIDENCE_ANSWER,
+      answer: refusalAnswer,
       hasSufficientEvidence: false,
       isGrounded: false,
       citationValidationPassed: true,
@@ -324,12 +365,24 @@ export async function answerQuestion(
       evidenceUsed: [],
       documentId,
       question,
+      sectionId: sectionId ?? null,
+      fallbackUsed: false,
     };
   }
 
   // 4. Construct Prompts
   const systemPrompt = buildQaSystemPrompt();
-  const userPrompt = buildQaUserPrompt(question, retrieval.chunks);
+  const userPrompt = buildQaUserPrompt(
+    question,
+    retrieval.chunks,
+    sectionId
+      ? {
+          sectionId,
+          sectionTitle: retrieval.targetSectionTitle,
+          fallbackUsed: retrieval.fallbackUsed,
+        }
+      : undefined
+  );
 
   // 5. Call OpenAI Structured Output
   let modelOutput: ModelQaOutput;
@@ -408,6 +461,8 @@ export async function answerQuestion(
     evidenceUsed: retrieval.chunks,
     documentId,
     question,
+    sectionId: sectionId ?? null,
+    fallbackUsed: retrieval.fallbackUsed ?? false,
   };
 }
 
@@ -438,14 +493,16 @@ export function formatConversationalContext(turns: ConversationalTurn[]): string
 export function buildQaConversationUserPrompt(
   question: string,
   chunks: RetrievedChunk[],
-  priorTurns?: ConversationalTurn[]
+  priorTurns?: ConversationalTurn[],
+  sectionContext?: SectionContextPromptInfo
 ): string {
   const contextBlock = priorTurns && priorTurns.length > 0
     ? formatConversationalContext(priorTurns)
     : "";
+  const sectionBlock = formatSectionContext(sectionContext);
   const formattedEvidence = formatEvidenceContext(chunks);
 
-  return `${contextBlock}CURRENT USER QUESTION:
+  return `${contextBlock}${sectionBlock}CURRENT USER QUESTION:
 ${question}
 
 ${UNTRUSTED_EVIDENCE_START}
@@ -547,6 +604,8 @@ export interface QaStreamEventComplete {
   evidenceUsed: RetrievedChunk[];
   documentId: string;
   conversationId: string;
+  sectionId?: string | null;
+  fallbackUsed?: boolean;
 }
 
 export interface QaStreamEventError {
@@ -565,6 +624,7 @@ export interface AnswerConversationQuestionStreamInput {
   userId: string;
   conversationId: string;
   question: string;
+  sectionId?: string | null;
   priorTurns?: ConversationalTurn[];
   retrievalConfig?: RetrievalConfig;
   signal?: AbortSignal;
@@ -588,6 +648,7 @@ export async function* answerConversationQuestionStream(
     userId,
     conversationId,
     question,
+    sectionId,
     priorTurns,
     retrievalConfig,
     signal,
@@ -601,13 +662,14 @@ export async function* answerConversationQuestionStream(
 
   if (signal?.aborted) return;
 
-  // 3. Evidence retrieval (deterministic: strictly on current question)
+  // 3. Evidence retrieval (deterministic: strictly on current question with optional section constraint)
   let retrieval: RetrievalResult;
   try {
     retrieval = await retrieveDocumentEvidence({
       documentId,
       userId,
       question,
+      sectionId,
       config: retrievalConfig,
     });
   } catch (error) {
@@ -623,21 +685,26 @@ export async function* answerConversationQuestionStream(
   // 4. Evidence sufficiency gate
   // If insufficient evidence or zero chunks, persist refusal and complete without LLM
   if (!retrieval.hasSufficientEvidence || retrieval.chunks.length === 0) {
+    const refusalText = sectionId
+      ? INSUFFICIENT_SECTION_EVIDENCE_ANSWER
+      : INSUFFICIENT_EVIDENCE_ANSWER;
+
     const refusalMsg = await appendAssistantMessage({
       conversationId,
       documentId,
       userId,
-      content: INSUFFICIENT_EVIDENCE_ANSWER,
+      content: refusalText,
       citations: [],
       hasSufficientEvidence: false,
       isGrounded: false,
       citationValidationPassed: true,
+      metadata: sectionId ? { sectionId, fallbackUsed: false } : undefined,
     });
 
     yield {
       type: "complete",
       messageId: refusalMsg.id,
-      answer: INSUFFICIENT_EVIDENCE_ANSWER,
+      answer: refusalText,
       citations: [],
       hasSufficientEvidence: false,
       isGrounded: false,
@@ -645,6 +712,8 @@ export async function* answerConversationQuestionStream(
       evidenceUsed: [],
       documentId,
       conversationId,
+      sectionId: sectionId ?? null,
+      fallbackUsed: false,
     };
     return;
   }
@@ -658,7 +727,14 @@ export async function* answerConversationQuestionStream(
   const userPrompt = buildQaConversationUserPrompt(
     question,
     retrieval.chunks,
-    boundedPriorTurns
+    boundedPriorTurns,
+    sectionId
+      ? {
+          sectionId,
+          sectionTitle: retrieval.targetSectionTitle,
+          fallbackUsed: retrieval.fallbackUsed,
+        }
+      : undefined
   );
 
   let fullJsonBuffer = "";
@@ -776,6 +852,9 @@ export async function* answerConversationQuestionStream(
     hasSufficientEvidence: true,
     isGrounded,
     citationValidationPassed,
+    metadata: sectionId
+      ? { sectionId, fallbackUsed: retrieval.fallbackUsed ?? false }
+      : undefined,
   });
 
   // 9. Emit terminal complete event with authoritative message data
@@ -790,6 +869,8 @@ export async function* answerConversationQuestionStream(
     evidenceUsed: retrieval.chunks,
     documentId,
     conversationId,
+    sectionId: sectionId ?? null,
+    fallbackUsed: retrieval.fallbackUsed ?? false,
   };
 }
 

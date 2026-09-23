@@ -22,6 +22,9 @@
 
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { and, eq } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { documentSections } from "@/lib/db/schema";
 import { auth } from "@/auth";
 import {
   verifyConversationOwnership,
@@ -40,6 +43,7 @@ const MessageBodySchema = z.object({
     .trim()
     .min(1, "Question must not be empty")
     .max(2000, "Question must not exceed 2000 characters"),
+  sectionId: z.string().trim().min(1).max(100).optional().nullable(),
 });
 
 interface RouteParams {
@@ -94,6 +98,7 @@ export async function POST(
   }
 
   const question = parseResult.data.question;
+  const rawSectionId = parseResult.data.sectionId?.trim() || null;
 
   // 4. Verify conversation ownership at domain boundary
   try {
@@ -111,13 +116,55 @@ export async function POST(
     );
   }
 
-  // 5. Persist user message to database
+  // 4b. Verify section ownership if sectionId is supplied (anti-oracle)
+  let sectionId: string | null = null;
+  if (rawSectionId) {
+    if (!UUID_REGEX.test(rawSectionId)) {
+      return NextResponse.json(
+        { error: "Section not found or access denied" },
+        { status: 404 }
+      );
+    }
+
+    try {
+      const [sec] = await db
+        .select({ id: documentSections.id })
+        .from(documentSections)
+        .where(
+          and(
+            eq(documentSections.id, rawSectionId),
+            eq(documentSections.documentId, cleanDocId)
+          )
+        )
+        .limit(1);
+
+      if (!sec) {
+        return NextResponse.json(
+          { error: "Section not found or access denied" },
+          { status: 404 }
+        );
+      }
+      sectionId = rawSectionId;
+    } catch (error) {
+      console.error(
+        `[POST messages] Failed to verify section ownership for doc ${cleanDocId}, sec ${rawSectionId}:`,
+        error
+      );
+      return NextResponse.json(
+        { error: "Failed to verify section access" },
+        { status: 500 }
+      );
+    }
+  }
+
+  // 5. Persist user message to database (with optional sectionId metadata)
   try {
     await appendUserMessage({
       conversationId: cleanConvoId,
       documentId: cleanDocId,
       userId,
       content: question,
+      metadata: sectionId ? { sectionId } : undefined,
     });
   } catch (error) {
     console.error(
@@ -172,6 +219,7 @@ export async function POST(
           userId,
           conversationId: cleanConvoId,
           question,
+          sectionId,
           priorTurns,
           signal: request.signal,
         });

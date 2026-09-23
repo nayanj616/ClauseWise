@@ -9,6 +9,7 @@ import {
   FileText,
   Calendar,
   Layers,
+  Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -24,6 +25,7 @@ export interface DocumentViewerProps {
   hideHeader?: boolean;
   highlightExcerpt?: string | null;
   highlightRef?: React.Ref<HTMLElement>;
+  onAskAboutSection?: (sectionId: string) => void;
 }
 
 /**
@@ -158,6 +160,7 @@ export function DocumentViewer({
   hideHeader = false,
   highlightExcerpt,
   highlightRef,
+  onAskAboutSection,
 }: DocumentViewerProps) {
   // Local state for active section selection (controlled or uncontrolled fallback)
   const [internalIndex, setInternalIndex] = React.useState<number>(0);
@@ -295,11 +298,28 @@ export function DocumentViewer({
               {getSectionDisplayTitle(activeSection)}
             </h2>
 
-            {activePageInfo && (
-              <Badge variant="outline" className="text-xs text-muted-foreground font-mono">
-                {activePageInfo}
-              </Badge>
-            )}
+            <div className="flex items-center gap-2">
+              {activePageInfo && (
+                <Badge variant="outline" className="text-xs text-muted-foreground font-mono">
+                  {activePageInfo}
+                </Badge>
+              )}
+
+              {onAskAboutSection && activeSection?.id && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onAskAboutSection(activeSection.id)}
+                  className="text-xs gap-1.5 h-7 px-2.5 text-primary border-primary/30 hover:bg-primary/10 hover:border-primary"
+                  data-testid="ask-about-section-button"
+                  title="Ask a question about this specific section"
+                >
+                  <Sparkles size={13} className="text-primary" aria-hidden="true" />
+                  <span>Ask about this section</span>
+                </Button>
+              )}
+            </div>
           </div>
 
           <div className="whitespace-pre-wrap font-sans text-sm sm:text-base leading-relaxed text-foreground break-words pt-2">
@@ -386,11 +406,28 @@ export function DocumentViewer({
                   {`Section ${activeSection.orderIndex + 1} of ${sections.length}`}
                 </Badge>
 
-                {activePageInfo && (
-                  <Badge variant="outline" className="text-xs text-muted-foreground font-mono">
-                    {activePageInfo}
-                  </Badge>
-                )}
+                <div className="flex items-center gap-2">
+                  {activePageInfo && (
+                    <Badge variant="outline" className="text-xs text-muted-foreground font-mono">
+                      {activePageInfo}
+                    </Badge>
+                  )}
+
+                  {onAskAboutSection && activeSection?.id && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => onAskAboutSection(activeSection.id)}
+                      className="text-xs gap-1.5 h-7 px-2.5 text-primary border-primary/30 hover:bg-primary/10 hover:border-primary"
+                      data-testid="ask-about-section-button"
+                      title="Ask a question about this specific section"
+                    >
+                      <Sparkles size={13} className="text-primary" aria-hidden="true" />
+                      <span>Ask about this section</span>
+                    </Button>
+                  )}
+                </div>
               </div>
 
               <h2 className="text-xl font-semibold tracking-tight text-foreground break-words">

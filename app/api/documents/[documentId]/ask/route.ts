@@ -34,6 +34,7 @@ const AskBodySchema = z.object({
     .trim()
     .min(1, "Question must not be empty")
     .max(2000, "Question must not exceed 2000 characters"),
+  sectionId: z.string().trim().min(1).max(100).optional().nullable(),
 });
 
 interface RouteParams {
@@ -80,12 +81,21 @@ export async function POST(
     return NextResponse.json({ error: firstIssue }, { status: 400 });
   }
 
+  const rawSectionId = parseResult.data.sectionId?.trim() || null;
+  if (rawSectionId && !UUID_REGEX.test(rawSectionId)) {
+    return NextResponse.json(
+      { error: "Document not found or access denied" },
+      { status: 404 }
+    );
+  }
+
   // 4. Delegate to domain QA service
   try {
     const result = await answerQuestion({
       documentId: documentId.trim(),
       userId,
       question: parseResult.data.question,
+      ...(rawSectionId ? { sectionId: rawSectionId } : {}),
     });
 
     return NextResponse.json(result, { status: 200 });

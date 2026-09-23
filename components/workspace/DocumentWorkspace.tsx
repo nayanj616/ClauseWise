@@ -74,6 +74,9 @@ export function DocumentWorkspace({
   // Active evidence excerpt to highlight in DocumentViewer (Phase 4 Slice 4.3)
   const [activeEvidenceExcerpt, setActiveEvidenceExcerpt] = React.useState<string | null>(null);
 
+  // Selected section context for Ask assistant (Phase 6 Contextual Assistant)
+  const [activeContextSectionId, setActiveContextSectionId] = React.useState<string | null>(null);
+
   // Map sections by id for fast lookups
   const sectionsById = React.useMemo(() => {
     const map = new Map<string, WorkspaceSection>();
@@ -82,6 +85,12 @@ export function DocumentWorkspace({
     }
     return map;
   }, [sections]);
+
+  // Handler for "Ask about this section" from DocumentViewer
+  const handleAskAboutSection = React.useCallback((sectionId: string) => {
+    setActiveContextSectionId(sectionId);
+    setActiveTab("ask");
+  }, []);
 
   // Resolve currently selected finding
   const selectedFinding = React.useMemo(() => {
@@ -336,6 +345,7 @@ export function DocumentWorkspace({
             selectedIndex={selectedSectionIndex}
             onSelectIndex={setSelectedSectionIndex}
             highlightExcerpt={activeEvidenceExcerpt}
+            onAskAboutSection={handleAskAboutSection}
             hideHeader
           />
         </main>
@@ -350,6 +360,9 @@ export function DocumentWorkspace({
             documentId={document.id}
             documentTitle={document.filename}
             sectionsById={sectionsById}
+            sections={sections}
+            activeSectionId={activeContextSectionId}
+            onSelectContextSectionId={setActiveContextSectionId}
             onNavigateToCitation={handleNavigateToCitation}
             onAsk={onAsk}
             initialResult={initialAskResult}

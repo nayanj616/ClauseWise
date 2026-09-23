@@ -19,6 +19,7 @@ import type {
 
 export interface AskQuestionClientOptions {
   signal?: AbortSignal;
+  sectionId?: string | null;
 }
 
 export interface StreamMessageCallbacks {
@@ -52,7 +53,10 @@ export async function askDocumentQuestionApi(
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ question: trimmed }),
+      body: JSON.stringify({
+        question: trimmed,
+        ...(options?.sectionId !== undefined ? { sectionId: options.sectionId } : {}),
+      }),
       signal: options?.signal,
     }
   );
@@ -211,7 +215,10 @@ export async function streamConversationMessageApi(
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ question: trimmed }),
+      body: JSON.stringify({
+        question: trimmed,
+        ...(options?.sectionId !== undefined ? { sectionId: options.sectionId } : {}),
+      }),
       signal: options?.signal,
     }
   );

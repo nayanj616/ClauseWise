@@ -14,6 +14,9 @@ import {
   Trash2,
   Square,
   MessageSquare,
+  FileText,
+  X,
+  Layers,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -38,9 +41,16 @@ export interface AskPanelProps {
   documentId: string;
   documentTitle?: string;
   sectionsById?: Map<string, WorkspaceSection>;
+  sections?: WorkspaceSection[];
+  activeSectionId?: string | null;
+  onSelectContextSectionId?: (sectionId: string | null) => void;
   onNavigateToCitation?: (citation: QaCitation) => void;
   /** Custom ask function for testing or mock environments. */
-  onAsk?: (documentId: string, question: string) => Promise<AnswerQuestionResult>;
+  onAsk?: (
+    documentId: string,
+    question: string,
+    sectionId?: string | null
+  ) => Promise<AnswerQuestionResult>;
   /** Optional initial result to render (Phase 5.3 compatibility) */
   initialResult?: AnswerQuestionResult | null;
   /** Optional initial conversations for testing */
@@ -57,6 +67,13 @@ const STARTER_QUESTIONS = [
   "What are the payment terms and invoice dispute deadlines?",
   "What is the governing law and dispute resolution mechanism?",
   "What are the key obligations and responsibilities of the parties?",
+];
+
+const CONTEXTUAL_STARTER_QUESTIONS = [
+  "What are the core obligations and commitments in this section?",
+  "Are there any deadlines, notice periods, or timing rules here?",
+  "Does this section specify remedies, liabilities, or termination rights?",
+  "What exceptions, conditions, or exclusions apply to this clause?",
 ];
 
 /**
@@ -85,6 +102,9 @@ export function AskPanel({
   documentId,
   documentTitle,
   sectionsById,
+  sections,
+  activeSectionId,
+  onSelectContextSectionId,
   onNavigateToCitation,
   onAsk,
   initialResult = null,
@@ -100,6 +120,44 @@ export function AskPanel({
     string | null
   >(initialConversationId || initialConversations[0]?.id || null);
   const [messages, setMessages] = React.useState<Message[]>(initialMessages);
+
+  // Section context state (supports both controlled activeSectionId and internal state)
+  const [internalSectionId, setInternalSectionId] = React.useState<string | null>(
+    activeSectionId !== undefined ? activeSectionId : null
+  );
+
+  const currentSectionId =
+    activeSectionId !== undefined ? activeSectionId : internalSectionId;
+
+  const handleSelectContextSection = React.useCallback(
+    (secId: string | null) => {
+      setInternalSectionId(secId);
+      onSelectContextSectionId?.(secId);
+    },
+    [onSelectContextSectionId]
+  );
+
+  // Derive flat sections list sorted by orderIndex
+  const availableSections = React.useMemo(() => {
+    if (sections && sections.length > 0) return sections;
+    if (sectionsById) {
+      return Array.from(sectionsById.values()).sort(
+        (a, b) => a.orderIndex - b.orderIndex
+      );
+    }
+    return [];
+  }, [sections, sectionsById]);
+
+  // Derive active section object
+  const activeSection = React.useMemo(() => {
+    if (!currentSectionId) return null;
+    return (
+      sections?.find((s) => s.id === currentSectionId) ||
+      sectionsById?.get(currentSectionId) ||
+      availableSections.find((s) => s.id === currentSectionId) ||
+      null
+    );
+  }, [currentSectionId, sections, sectionsById, availableSections]);
 
   // Streaming and loading state
   const [isStreaming, setIsStreaming] = React.useState<boolean>(false);
@@ -267,7 +325,7 @@ export function AskPanel({
       // Custom mock onAsk hook (if supplied in props)
       if (onAsk) {
         try {
-          const response = await onAsk(documentId, trimmed);
+          const response = await onAsk(documentId, trimmed, currentSectionId);
           setResult(response);
           // Also append to local messages list
           const userMsg: Message = {
@@ -279,7 +337,7 @@ export function AskPanel({
             hasSufficientEvidence: null,
             isGrounded: null,
             citationValidationPassed: null,
-            metadata: null,
+            metadata: currentSectionId ? { sectionId: currentSectionId } : null,
             createdAt: new Date(),
           };
           const asstMsg: Message = {
@@ -291,7 +349,7 @@ export function AskPanel({
             hasSufficientEvidence: response.hasSufficientEvidence,
             isGrounded: response.isGrounded,
             citationValidationPassed: response.citationValidationPassed,
-            metadata: null,
+            metadata: currentSectionId ? { sectionId: currentSectionId } : null,
             createdAt: new Date(),
           };
           setMessages((prev) => [...prev, userMsg, asstMsg]);
@@ -341,7 +399,7 @@ export function AskPanel({
               const singleTurnResponse = await askDocumentQuestionApi(
                 documentId,
                 trimmed,
-                { signal: controller.signal }
+                { signal: controller.signal, sectionId: currentSectionId }
               );
               setResult(singleTurnResponse);
               setQuestion("");
@@ -362,7 +420,7 @@ export function AskPanel({
           hasSufficientEvidence: null,
           isGrounded: null,
           citationValidationPassed: null,
-          metadata: null,
+          metadata: currentSectionId ? { sectionId: currentSectionId } : null,
           createdAt: new Date(),
         };
         setMessages((prev) => [...prev, tempUserMessage]);
@@ -393,7 +451,13 @@ export function AskPanel({
                 hasSufficientEvidence: complete.hasSufficientEvidence,
                 isGrounded: complete.isGrounded,
                 citationValidationPassed: complete.citationValidationPassed,
-                metadata: null,
+                metadata:
+                  complete.sectionId || complete.fallbackUsed !== undefined
+                    ? {
+                        sectionId: complete.sectionId,
+                        fallbackUsed: complete.fallbackUsed,
+                      }
+                    : null,
                 createdAt: new Date(),
               };
 
@@ -418,7 +482,7 @@ export function AskPanel({
               setStreamingDelta("");
             },
           },
-          { signal: controller.signal }
+          { signal: controller.signal, sectionId: currentSectionId }
         );
       } catch (err) {
         if (controller.signal.aborted) {
@@ -437,7 +501,7 @@ export function AskPanel({
         abortControllerRef.current = null;
       }
     },
-    [documentId, activeConversationId, isStreaming, onAsk]
+    [documentId, activeConversationId, isStreaming, onAsk, currentSectionId]
   );
 
   const handleSubmit = (e?: React.FormEvent) => {
@@ -562,6 +626,67 @@ export function AskPanel({
             </Button>
           )}
         </div>
+
+        {/* Scope selector bar */}
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t text-xs">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Layers size={13} aria-hidden="true" />
+            <span>Scope:</span>
+            <select
+              value={currentSectionId || ""}
+              onChange={(e) => handleSelectContextSection(e.target.value || null)}
+              disabled={isStreaming}
+              aria-label="Filter context by document section"
+              className="bg-background border rounded px-2 py-1 text-xs text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary max-w-xs truncate"
+              data-testid="section-context-selector"
+            >
+              <option value="">Whole Document (Entire Scope)</option>
+              {availableSections.map((s, idx) => (
+                <option key={s.id} value={s.id}>
+                  {s.title ? s.title : `Section ${idx + 1}`}
+                  {typeof s.pageStart === "number" && s.pageStart > 0
+                    ? ` (Page ${s.pageStart})`
+                    : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* Active Section Context Banner */}
+        {currentSectionId && activeSection && (
+          <div
+            className="flex items-center justify-between gap-3 px-3.5 py-2.5 rounded-lg border border-primary/30 bg-primary/5 text-xs animate-fade-in"
+            data-testid="active-section-context-banner"
+          >
+            <div className="flex items-center gap-2 min-w-0">
+              <FileText size={15} className="text-primary shrink-0" aria-hidden="true" />
+              <span className="text-muted-foreground font-medium shrink-0">Asking about:</span>
+              <span className="font-semibold text-foreground truncate">
+                {activeSection.title || `Section ${activeSection.orderIndex + 1}`}
+              </span>
+              {typeof activeSection.pageStart === "number" && activeSection.pageStart > 0 && (
+                <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-mono shrink-0">
+                  Page {activeSection.pageStart}
+                </Badge>
+              )}
+            </div>
+
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => handleSelectContextSection(null)}
+              disabled={isStreaming}
+              className="h-6 px-2 text-xs text-muted-foreground hover:text-foreground gap-1"
+              data-testid="clear-section-context-button"
+              title="Clear section context and search entire document"
+            >
+              <X size={12} aria-hidden="true" />
+              <span>Clear context</span>
+            </Button>
+          </div>
+        )}
       </section>
 
       {/* 2. Scrollable Conversation Message History */}
@@ -573,15 +698,43 @@ export function AskPanel({
         >
           {messages.map((msg, index) => {
             if (msg.role === "user") {
+              const metaSecId =
+                msg.metadata &&
+                typeof msg.metadata === "object" &&
+                "sectionId" in msg.metadata &&
+                typeof msg.metadata.sectionId === "string"
+                  ? msg.metadata.sectionId
+                  : null;
+
+              const contextSection = metaSecId
+                ? sectionsById?.get(metaSecId) ||
+                  sections?.find((s) => s.id === metaSecId) ||
+                  availableSections.find((s) => s.id === metaSecId)
+                : null;
+
               return (
                 <div
                   key={msg.id || `user-${index}`}
-                  className="flex justify-end"
+                  className="flex flex-col items-end gap-1.5"
                   data-testid={`user-message-${index}`}
                 >
                   <div className="max-w-[85%] rounded-2xl rounded-br-sm bg-primary text-primary-foreground px-4 py-2.5 shadow-sm text-sm whitespace-pre-wrap">
                     <p className="font-sans">{msg.content}</p>
                   </div>
+                  {metaSecId && (
+                    <div
+                      data-testid="user-message-context-badge"
+                      className="flex items-center gap-1 text-[11px] text-muted-foreground pr-1"
+                    >
+                      <FileText size={11} className="text-primary/70" aria-hidden="true" />
+                      <span>
+                        Focused on:{" "}
+                        <strong className="font-medium text-foreground/80">
+                          {contextSection?.title || "Targeted Section"}
+                        </strong>
+                      </span>
+                    </div>
+                  )}
                 </div>
               );
             }
@@ -669,6 +822,29 @@ export function AskPanel({
                       </div>
                     </div>
                   )}
+
+                  {/* Fallback Provenance Notice */}
+                  {msg.metadata &&
+                    typeof msg.metadata === "object" &&
+                    "fallbackUsed" in msg.metadata &&
+                    msg.metadata.fallbackUsed === true && (
+                      <div
+                        className="rounded-lg border border-amber-200/80 bg-amber-50/50 dark:border-amber-900/40 dark:bg-amber-950/20 px-3.5 py-2.5 text-xs text-amber-800 dark:text-amber-300 flex items-start gap-2 shadow-sm"
+                        data-testid="fallback-provenance-notice"
+                      >
+                        <AlertCircle
+                          size={15}
+                          className="shrink-0 mt-0.5 text-amber-600 dark:text-amber-400"
+                          aria-hidden="true"
+                        />
+                        <div className="space-y-0.5">
+                          <span className="font-semibold block">Same-Document Fallback Used</span>
+                          <span className="leading-relaxed">
+                            Direct evidence was not found in the selected section. This answer incorporates relevant provisions found elsewhere in the document.
+                          </span>
+                        </div>
+                      </div>
+                    )}
 
                   {/* Grounded Answer Card */}
                   {isGroundedSuccess && (
@@ -864,6 +1040,26 @@ export function AskPanel({
             </section>
           )}
 
+          {/* Single-turn Fallback Provenance Notice */}
+          {result && result.fallbackUsed === true && (
+            <div
+              className="rounded-lg border border-amber-200/80 bg-amber-50/50 dark:border-amber-900/40 dark:bg-amber-950/20 px-3.5 py-2.5 text-xs text-amber-800 dark:text-amber-300 flex items-start gap-2 shadow-sm"
+              data-testid="fallback-provenance-notice"
+            >
+              <AlertCircle
+                size={15}
+                className="shrink-0 mt-0.5 text-amber-600 dark:text-amber-400"
+                aria-hidden="true"
+              />
+              <div className="space-y-0.5">
+                <span className="font-semibold block">Same-Document Fallback Used</span>
+                <span className="leading-relaxed">
+                  Direct evidence was not found in the selected section. This answer incorporates relevant provisions found elsewhere in the document.
+                </span>
+              </div>
+            </div>
+          )}
+
           {/* Grounded Answer Card */}
           {isSingleTurnGrounded && (
             <section
@@ -979,19 +1175,25 @@ export function AskPanel({
 
           <div className="space-y-1.5 max-w-lg mx-auto">
             <h3 className="text-base font-semibold text-foreground">
-              Ask Any Question About This Document
+              {activeSection
+                ? `Ask About ${activeSection.title || "Selected Section"}`
+                : "Ask Any Question About This Document"}
             </h3>
             <p className="text-xs text-muted-foreground leading-relaxed">
-              ClauseWise searches authentic document sections to provide concise, plain-English answers with clickable citations back to the source text.
+              {activeSection
+                ? "Targeted questions are evaluated against the selected section first, ensuring precise, grounded answers with citations."
+                : "ClauseWise searches authentic document sections to provide concise, plain-English answers with clickable citations back to the source text."}
             </p>
           </div>
 
           <div className="space-y-2 pt-2 text-left max-w-xl mx-auto">
             <span className="text-xs font-medium text-muted-foreground block text-center sm:text-left">
-              Suggested questions to get started:
+              {activeSection
+                ? `Suggested questions for ${activeSection.title || "this section"}:`
+                : "Suggested questions to get started:"}
             </span>
             <div className="grid grid-cols-1 gap-2">
-              {STARTER_QUESTIONS.map((q, idx) => (
+              {(activeSection ? CONTEXTUAL_STARTER_QUESTIONS : STARTER_QUESTIONS).map((q, idx) => (
                 <button
                   key={idx}
                   type="button"
@@ -1059,7 +1261,11 @@ export function AskPanel({
               onKeyDown={handleKeyDown}
               disabled={isStreaming}
               maxLength={2000}
-              placeholder="Ask a question about terms, deadlines, obligations, or provisions..."
+              placeholder={
+                activeSection
+                  ? `Ask a question about ${activeSection.title || "the selected section"}...`
+                  : "Ask a question about terms, deadlines, obligations, or provisions..."
+              }
               aria-label="Question about document"
               className={cn(
                 "w-full rounded-lg border bg-background px-3.5 py-2.5 text-sm leading-relaxed text-foreground placeholder:text-muted-foreground/70",

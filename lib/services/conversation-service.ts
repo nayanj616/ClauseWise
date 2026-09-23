@@ -305,6 +305,7 @@ export async function appendUserMessage(input: {
   documentId: string;
   userId: string;
   content: string;
+  metadata?: Record<string, unknown>;
 }): Promise<Message> {
   const { conversationId, documentId, userId } =
     ConversationMutationSchema.parse({
@@ -331,6 +332,7 @@ export async function appendUserMessage(input: {
         hasSufficientEvidence: null,
         isGrounded: null,
         citationValidationPassed: null,
+        metadata: input.metadata ?? null,
       })
       .returning();
 

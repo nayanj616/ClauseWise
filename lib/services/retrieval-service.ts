@@ -16,7 +16,7 @@
  * SERVER-SIDE ONLY — do not import in client components.
  */
 
-import { and, asc, eq, isNotNull, sql, cosineDistance } from "drizzle-orm";
+import { and, asc, eq, ne, isNotNull, sql, cosineDistance } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import {
@@ -98,6 +98,7 @@ export const DocumentRetrievalInputSchema = z.object({
     .trim()
     .min(1, "Question must not be empty")
     .max(2000, "Question must not exceed 2000 characters"),
+  sectionId: z.string().uuid("Invalid section ID format").optional().nullable(),
   config: RetrievalConfigSchema.optional().default({}),
 });
 
@@ -121,6 +122,9 @@ export interface RetrievalResult {
   chunks: RetrievedChunk[];
   hasSufficientEvidence: boolean;
   totalChunksExamined: number;
+  sectionId?: string | null;
+  targetSectionTitle?: string | null;
+  fallbackUsed?: boolean;
 }
 
 export interface FindingWithEvidence {
@@ -442,7 +446,7 @@ export async function retrieveDocumentEvidence(
     );
   }
 
-  const { documentId, userId, question, config } = parseResult.data;
+  const { documentId, userId, question, sectionId, config } = parseResult.data;
   const topK = config.topK ?? 5;
   const minSimilarity = config.minSimilarity ?? 0.2;
 
@@ -475,6 +479,35 @@ export async function retrieveDocumentEvidence(
     throw new DocumentAccessError("Document not found or access denied");
   }
 
+  // 2b. Section Authorization Boundary (when sectionId is provided)
+  let targetSection: { id: string; title: string } | undefined;
+  if (sectionId) {
+    try {
+      const [foundSec] = await db
+        .select({ id: documentSections.id, title: documentSections.title })
+        .from(documentSections)
+        .where(
+          and(
+            eq(documentSections.id, sectionId),
+            eq(documentSections.documentId, documentId)
+          )
+        )
+        .limit(1);
+      targetSection = foundSec;
+    } catch (error) {
+      console.error(
+        `[retrieveDocumentEvidence] DB error checking section for doc ${documentId}, section ${sectionId}:`,
+        sanitizeError(error)
+      );
+      throw new VectorSearchError("Failed to verify section access", { cause: error });
+    }
+
+    if (!targetSection) {
+      // Anti-oracle protection for section: Return uniform DocumentAccessError
+      throw new DocumentAccessError("Section not found or access denied");
+    }
+  }
+
   // 3. Question Embedding via existing OpenAI integration
   let queryEmbedding: number[];
   try {
@@ -494,6 +527,163 @@ export async function retrieveDocumentEvidence(
   const distanceExpr = cosineDistance(documentChunks.embedding, queryEmbedding);
   const similarityExpr = sql<number>`1 - (${distanceExpr})`;
 
+  function evaluateChunks(
+    rowsToEval: Array<{
+      chunkId: string;
+      documentId: string;
+      sectionId: string;
+      content: string;
+      pageNumber: number | null;
+      tokenCount: number | null;
+      chunkIndex: number;
+      similarity: unknown;
+    }>
+  ): RetrievedChunk[] {
+    const qualified: RetrievedChunk[] = [];
+    for (const row of rowsToEval) {
+      const rawSim = Number(row.similarity);
+      const similarity = isNaN(rawSim)
+        ? 0
+        : Math.max(-1, Math.min(1, Math.round(rawSim * 10000) / 10000));
+
+      if (similarity >= minSimilarity) {
+        qualified.push({
+          chunkId: row.chunkId,
+          documentId: row.documentId,
+          sectionId: row.sectionId ?? null,
+          content: row.content,
+          pageNumber: row.pageNumber,
+          similarity,
+          chunkIndex: row.chunkIndex,
+          tokenCount: row.tokenCount,
+        });
+      }
+    }
+    return qualified;
+  }
+
+  // Contextual targeted retrieval when sectionId is specified
+  if (sectionId) {
+    let sectionRows: Array<{
+      chunkId: string;
+      documentId: string;
+      sectionId: string;
+      content: string;
+      pageNumber: number | null;
+      tokenCount: number | null;
+      chunkIndex: number;
+      similarity: unknown;
+    }>;
+
+    try {
+      sectionRows = await db
+        .select({
+          chunkId: documentChunks.id,
+          documentId: documentChunks.documentId,
+          sectionId: documentChunks.sectionId,
+          content: documentChunks.content,
+          pageNumber: documentChunks.pageNumber,
+          tokenCount: documentChunks.tokenCount,
+          chunkIndex: documentChunks.chunkIndex,
+          similarity: similarityExpr,
+        })
+        .from(documentChunks)
+        .where(
+          and(
+            eq(documentChunks.documentId, documentId),
+            eq(documentChunks.sectionId, sectionId),
+            isNotNull(documentChunks.embedding)
+          )
+        )
+        .orderBy(asc(distanceExpr))
+        .limit(topK);
+    } catch (error) {
+      console.error(
+        `[retrieveDocumentEvidence] Section vector search failed on doc ${documentId}, section ${sectionId}:`,
+        sanitizeError(error)
+      );
+      throw new VectorSearchError("Failed to query document chunks via vector similarity", {
+        cause: error,
+      });
+    }
+
+    const sectionQualifiedChunks = evaluateChunks(sectionRows);
+
+    if (sectionQualifiedChunks.length > 0) {
+      return {
+        documentId,
+        sectionId,
+        targetSectionTitle: targetSection?.title ?? null,
+        question,
+        chunks: sectionQualifiedChunks,
+        hasSufficientEvidence: true,
+        totalChunksExamined: sectionRows.length,
+        fallbackUsed: false,
+      };
+    }
+
+    // Selected section did not contain sufficient evidence -> fallback to remainder of the same document
+    let fallbackRows: typeof sectionRows = [];
+    try {
+      fallbackRows = await db
+        .select({
+          chunkId: documentChunks.id,
+          documentId: documentChunks.documentId,
+          sectionId: documentChunks.sectionId,
+          content: documentChunks.content,
+          pageNumber: documentChunks.pageNumber,
+          tokenCount: documentChunks.tokenCount,
+          chunkIndex: documentChunks.chunkIndex,
+          similarity: similarityExpr,
+        })
+        .from(documentChunks)
+        .where(
+          and(
+            eq(documentChunks.documentId, documentId),
+            ne(documentChunks.sectionId, sectionId),
+            isNotNull(documentChunks.embedding)
+          )
+        )
+        .orderBy(asc(distanceExpr))
+        .limit(topK);
+    } catch (error) {
+      console.error(
+        `[retrieveDocumentEvidence] Fallback vector search failed on doc ${documentId}:`,
+        sanitizeError(error)
+      );
+      throw new VectorSearchError("Failed to query fallback document chunks via vector similarity", {
+        cause: error,
+      });
+    }
+
+    const fallbackQualifiedChunks = evaluateChunks(fallbackRows);
+
+    if (fallbackQualifiedChunks.length > 0) {
+      return {
+        documentId,
+        sectionId,
+        targetSectionTitle: targetSection?.title ?? null,
+        question,
+        chunks: fallbackQualifiedChunks,
+        hasSufficientEvidence: true,
+        totalChunksExamined: sectionRows.length + fallbackRows.length,
+        fallbackUsed: true,
+      };
+    }
+
+    return {
+      documentId,
+      sectionId,
+      targetSectionTitle: targetSection?.title ?? null,
+      question,
+      chunks: [],
+      hasSufficientEvidence: false,
+      totalChunksExamined: sectionRows.length + fallbackRows.length,
+      fallbackUsed: false,
+    };
+  }
+
+  // Document-wide retrieval (standard Phase 5 behavior when sectionId is not specified)
   let rows: Array<{
     chunkId: string;
     documentId: string;
@@ -544,30 +734,14 @@ export async function retrieveDocumentEvidence(
       chunks: [],
       hasSufficientEvidence: false,
       totalChunksExamined: 0,
+      sectionId: null,
+      targetSectionTitle: null,
+      fallbackUsed: false,
     };
   }
 
   // 6. Thresholding & relevance evaluation
-  const qualifiedChunks: RetrievedChunk[] = [];
-  for (const row of rows) {
-    const rawSim = Number(row.similarity);
-    const similarity = isNaN(rawSim)
-      ? 0
-      : Math.max(-1, Math.min(1, Math.round(rawSim * 10000) / 10000));
-
-    if (similarity >= minSimilarity) {
-      qualifiedChunks.push({
-        chunkId: row.chunkId,
-        documentId: row.documentId,
-        sectionId: row.sectionId ?? null,
-        content: row.content,
-        pageNumber: row.pageNumber,
-        similarity,
-        chunkIndex: row.chunkIndex,
-        tokenCount: row.tokenCount,
-      });
-    }
-  }
+  const qualifiedChunks = evaluateChunks(rows);
 
   return {
     documentId,
@@ -575,6 +749,9 @@ export async function retrieveDocumentEvidence(
     chunks: qualifiedChunks,
     hasSufficientEvidence: qualifiedChunks.length > 0,
     totalChunksExamined: rows.length,
+    sectionId: null,
+    targetSectionTitle: null,
+    fallbackUsed: false,
   };
 }
 
