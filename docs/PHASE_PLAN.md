@@ -547,28 +547,38 @@ and suggested questions.
 
 ---
 
-## Phase 8 — Professional Preparation
+## Phase 8 — Professional Preparation [COMPLETE]
 
 **Goal:** Users can generate a structured briefing for their lawyer meeting.
+**Documentation:** See [Phase 8 Specification](file:///c:/Users/jain_/Documents/PromptwarsExclusive/ClauseWise/docs/phases/08-professional-prep.md)
 
 ### Deliverables
 
 **Domain service**
-- `preparation-service.ts`
-  - `generateBriefing()` — structured briefing from findings, obligations, dates, actions
+- `lib/services/preparation-service.ts`
+  - `getProfessionalPrepData(documentId, userId)` — deterministic assembly of document profile, key clauses, categorized findings, open actions, discussion prompts for counsel, and user Q&A questions.
+- `lib/prep/markdown-export.ts`
+  - `formatBriefingAsMarkdown()` — zero-DB client-safe markdown formatter for copy-to-clipboard.
 
-**AI**
-- Briefing generation prompt (structured output: sections with source refs)
+**API Route**
+- `GET /api/documents/[documentId]/prep` — authenticated, anti-oracle protected retrieval of complete briefing.
 
 **UI**
-- Professional Prep page (per document)
-- Structured briefing display: key terms, important clauses, discussion areas, suggested questions
-- Print / copy to clipboard action
+- `components/prep/`
+  - `ProfessionalPrepTab`: Full briefing workspace tab.
+  - `PrepDisclaimerBanner` & `PrepDisclaimerFooter`: Explicit non-lawyer disclaimers.
+  - `PrepExportControls`: Copy Markdown & Print/Save PDF controls.
+  - `PrepDocumentOverview`: Metadata grid (parties, governing law, jurisdiction).
+  - `PrepKeyClauses`: Core clauses with section jump navigation.
+  - `PrepFindingsReview`: Categorized grounded findings (attention, absent provisions, ambiguities, obligations).
+  - `PrepOpenActions`: Review checklist with status toggle and quote references.
+  - `PrepQuestionsForCounsel`: Objective inquiry prompts for legal counsel.
+  - `PrepUserQuestions`: User-recorded questions from Q&A history.
+- `components/workspace/DocumentHeader.tsx` & `DocumentWorkspace.tsx`: Integrated `prep` tab with action badge and bidirectional source navigation.
 
 **Tests**
-- Unit: Zod schema for briefing output
-- Integration: briefing generation (mock OpenAI)
-- E2E: generate briefing → structured output rendered correctly
+- Unit: Service tests (`tests/unit/preparation-service.test.ts`), route tests (`tests/unit/preparation-routes.test.ts`), UI tests (`tests/unit/preparation-ui.test.tsx`).
+- E2E: Complete journey (`tests/e2e/professional-prep-flow.spec.ts`) covering briefing rendering, key clause jumping, finding excerpt navigation with highlight/focus, and direct URL routing.
 
 ---
 

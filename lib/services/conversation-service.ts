@@ -402,3 +402,50 @@ export async function appendAssistantMessage(input: {
   }
 }
 
+export interface UserRecordedQuestion {
+  id: string;
+  conversationId: string;
+  question: string;
+  createdAt: Date;
+}
+
+/**
+ * Retrieves all user questions asked across conversations for a document.
+ * Verifies document ownership (anti-oracle).
+ * Ordered by createdAt DESC, id DESC.
+ */
+export async function getUserQuestionsForDocument(input: {
+  documentId: string;
+  userId: string;
+}): Promise<UserRecordedQuestion[]> {
+  const { documentId, userId } = ConversationContextSchema.parse(input);
+  await verifyDocumentOwnership(documentId, userId);
+
+  try {
+    const rows = await db
+      .select({
+        id: messages.id,
+        conversationId: messages.conversationId,
+        question: messages.content,
+        createdAt: messages.createdAt,
+      })
+      .from(messages)
+      .innerJoin(conversations, eq(messages.conversationId, conversations.id))
+      .where(
+        and(
+          eq(conversations.documentId, documentId),
+          eq(conversations.userId, userId),
+          eq(messages.role, "user")
+        )
+      )
+      .orderBy(desc(messages.createdAt), desc(messages.id));
+
+    return rows;
+  } catch (error) {
+    if (error instanceof ConversationAccessError) throw error;
+    throw new ConversationServiceError("Failed to retrieve user questions", {
+      cause: error,
+    });
+  }
+}
+

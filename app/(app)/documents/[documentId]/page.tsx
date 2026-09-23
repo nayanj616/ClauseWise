@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { requireSession } from "@/lib/auth/session";
 import { getDocumentWorkspaceData } from "@/lib/services/document-service";
 import { getPersistedDocumentFindings } from "@/lib/services/intelligence-service";
+import { getProfessionalPrepData } from "@/lib/services/preparation-service";
 import { DocumentWorkspace } from "@/components/workspace/DocumentWorkspace";
 import { DocumentNotFoundState } from "@/components/workspace/WorkspaceStates";
 
@@ -10,7 +11,7 @@ interface DocumentWorkspacePageProps {
   searchParams?: Promise<{
     findingId?: string;
     sectionId?: string;
-    tab?: "analysis" | "document" | "ask";
+    tab?: "analysis" | "document" | "ask" | "prep";
   }>;
 }
 
@@ -25,8 +26,8 @@ export async function generateMetadata({
 }
 
 /**
- * Document Workspace Page — Phase 3 Slice 3.6
- * Server component loading persisted document metadata, sections, and findings.
+ * Document Workspace Page — Phase 3 Slice 3.6 / Phase 8 Professional Prep
+ * Server component loading persisted document metadata, sections, findings, and prep briefing.
  * Enforces ownership strictly by session.user.id.
  */
 export default async function DocumentWorkspacePage({
@@ -51,6 +52,17 @@ export default async function DocumentWorkspacePage({
   // Retrieve persisted findings for this document
   const findings = await getPersistedDocumentFindings(documentId);
 
+  // Retrieve professional prep briefing data server-side
+  let prepData = null;
+  try {
+    prepData = await getProfessionalPrepData(documentId, session.user.id);
+  } catch (err) {
+    console.error(
+      `[DocumentWorkspacePage] Prep data retrieval error for ${documentId}:`,
+      err
+    );
+  }
+
   return (
     <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto w-full">
       <DocumentWorkspace
@@ -59,6 +71,7 @@ export default async function DocumentWorkspacePage({
         initialFindingId={sp?.findingId}
         initialSectionId={sp?.sectionId}
         initialTab={sp?.tab}
+        initialPrepData={prepData}
       />
     </div>
   );

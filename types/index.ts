@@ -205,3 +205,14 @@ export type {
   UpdateActionStatusInput,
   ListActionsInput,
 } from "@/lib/services/action-service";
+
+// ---------------------------------------------------------------------------
+// Professional Prep (Phase 8)
+// ---------------------------------------------------------------------------
+
+export type {
+  KeyClauseItem,
+  ClarificationQuestion,
+  ProfessionalPrepData,
+} from "@/lib/services/preparation-service";
+export type { UserRecordedQuestion } from "@/lib/services/conversation-service";

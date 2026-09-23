@@ -10,6 +10,7 @@ import {
   FileText,
   Info,
   MessageSquare,
+  Briefcase,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -23,9 +24,10 @@ import {
 export interface DocumentHeaderProps {
   document: WorkspaceDocument;
   sectionCount: number;
-  activeTab: "analysis" | "document" | "ask";
-  onTabChange: (tab: "analysis" | "document" | "ask") => void;
+  activeTab: "analysis" | "document" | "ask" | "prep";
+  onTabChange: (tab: "analysis" | "document" | "ask" | "prep") => void;
   findingsCount?: number;
+  openActionsCount?: number;
   className?: string;
 }
 
@@ -93,6 +95,7 @@ export function DocumentHeader({
   activeTab,
   onTabChange,
   findingsCount = 0,
+  openActionsCount,
   className,
 }: DocumentHeaderProps) {
   const docFormat = formatMimeType(document.mimeType, document.filename);
@@ -305,6 +308,37 @@ export function DocumentHeader({
         >
           <MessageSquare size={15} aria-hidden="true" />
           <span>Ask</span>
+        </button>
+
+        <button
+          type="button"
+          role="tab"
+          id="tab-prep"
+          aria-selected={activeTab === "prep"}
+          aria-controls="panel-prep"
+          onClick={() => onTabChange("prep")}
+          className={cn(
+            "flex items-center gap-2 px-3.5 py-2 text-sm font-medium rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            activeTab === "prep"
+              ? "bg-primary text-primary-foreground shadow-sm"
+              : "text-muted-foreground hover:bg-muted/70 hover:text-foreground"
+          )}
+          data-testid="tab-prep-btn"
+        >
+          <Briefcase size={15} aria-hidden="true" />
+          <span>Professional Prep</span>
+          {typeof openActionsCount === "number" && openActionsCount > 0 && (
+            <span
+              className={cn(
+                "ml-1 text-xs px-1.5 py-0.2 rounded-full font-semibold",
+                activeTab === "prep"
+                  ? "bg-primary-foreground/20 text-primary-foreground"
+                  : "bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-300"
+              )}
+            >
+              {openActionsCount}
+            </span>
+          )}
         </button>
       </div>
     </header>

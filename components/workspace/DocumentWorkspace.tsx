@@ -21,6 +21,8 @@ import { FormattedDatesList } from "./FormattedDatesList";
 import { FormattedFinancialList } from "./FormattedFinancialList";
 import { AskPanel } from "./AskPanel";
 import { CreateActionDialog } from "@/components/actions/CreateActionDialog";
+import { ProfessionalPrepTab } from "@/components/prep/ProfessionalPrepTab";
+import type { ProfessionalPrepData, ActionWithDetails, ActionStatus } from "@/types";
 import {
   DocumentProcessingState,
   DocumentErrorState,
@@ -32,11 +34,13 @@ export interface DocumentWorkspaceProps {
   data: DocumentWorkspaceData;
   findings?: DocumentFinding[];
   className?: string;
-  initialTab?: "analysis" | "document" | "ask";
+  initialTab?: "analysis" | "document" | "ask" | "prep";
   initialFindingId?: string | null;
   initialSectionId?: string | null;
   onAsk?: (documentId: string, question: string) => Promise<AnswerQuestionResult>;
   initialAskResult?: AnswerQuestionResult | null;
+  initialPrepData?: ProfessionalPrepData | null;
+  initialActions?: ActionWithDetails[];
 }
 
 /**
@@ -62,11 +66,15 @@ export function DocumentWorkspace({
   initialSectionId,
   onAsk,
   initialAskResult,
+  initialPrepData,
+  initialActions,
 }: DocumentWorkspaceProps) {
   const { document, sections } = data;
 
-  // Tab state: "analysis" (intelligence overview & findings) vs "document" (verbatim section text) vs "ask" (document Q&A)
-  const [activeTab, setActiveTab] = React.useState<"analysis" | "document" | "ask">(initialTab);
+  // Tab state: "analysis" vs "document" vs "ask" vs "prep"
+  const [activeTab, setActiveTab] = React.useState<
+    "analysis" | "document" | "ask" | "prep"
+  >(initialTab);
 
   // Selected finding state
   const [selectedFindingId, setSelectedFindingId] = React.useState<string | null>(
@@ -85,6 +93,46 @@ export function DocumentWorkspace({
   // Action creation state (Phase 7 Action Center)
   const [actionFindingToCreate, setActionFindingToCreate] =
     React.useState<DocumentFinding | null>(null);
+
+  // Actions list state for review checklist
+  const [actionsList, setActionsList] = React.useState<ActionWithDetails[]>(
+    initialPrepData?.openActions || initialActions || []
+  );
+
+  React.useEffect(() => {
+    if (initialPrepData?.openActions) {
+      setActionsList(initialPrepData.openActions);
+    } else if (initialActions) {
+      setActionsList(initialActions);
+    }
+  }, [initialPrepData, initialActions]);
+
+  const handleToggleActionStatus = React.useCallback(
+    async (actionId: string, currentStatus: ActionStatus) => {
+      const nextStatus = currentStatus === "open" ? "completed" : "open";
+      setActionsList((prev) =>
+        prev.map((a) => (a.id === actionId ? { ...a, status: nextStatus } : a))
+      );
+
+      try {
+        const res = await fetch(`/api/actions/${actionId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: nextStatus }),
+        });
+        if (!res.ok) {
+          setActionsList((prev) =>
+            prev.map((a) => (a.id === actionId ? { ...a, status: currentStatus } : a))
+          );
+        }
+      } catch {
+        setActionsList((prev) =>
+          prev.map((a) => (a.id === actionId ? { ...a, status: currentStatus } : a))
+        );
+      }
+    },
+    []
+  );
 
   // Map sections by id for fast lookups
   const sectionsById = React.useMemo(() => {
@@ -145,12 +193,129 @@ export function DocumentWorkspace({
     : undefined;
 
   // Resolve important sections from metadata
-  const metadata = (document.metadata || {}) as Record<string, unknown>;
-  const extraction = (metadata.extraction || {}) as Record<string, unknown>;
-  const importantSections =
-    (metadata.importantSections as ValidatedImportantSection[] | undefined) ||
-    (extraction.importantSections as ValidatedImportantSection[] | undefined) ||
-    [];
+  const metadata = React.useMemo(
+    () => (document.metadata || {}) as Record<string, unknown>,
+    [document.metadata]
+  );
+  const importantSections = React.useMemo(() => {
+    const extraction = (metadata.extraction || {}) as Record<string, unknown>;
+    return (
+      (metadata.importantSections as ValidatedImportantSection[] | undefined) ||
+      (extraction.importantSections as ValidatedImportantSection[] | undefined) ||
+      []
+    );
+  }, [metadata]);
+
+  // Assemble or adapt Professional Prep briefing data
+  const prepDataToRender: ProfessionalPrepData = React.useMemo(() => {
+    const openActions = actionsList.filter((a) => a.status === "open");
+    const completedCount = actionsList.filter((a) => a.status === "completed").length;
+
+    if (initialPrepData) {
+      return {
+        ...initialPrepData,
+        openActions,
+        completedActionsCount: completedCount,
+      };
+    }
+
+    const docClassification = (metadata.classification || {}) as Record<string, unknown>;
+    const isStatedType = docClassification.isStatedInText === true;
+    const executiveSummary = (metadata.executiveSummary as string) || null;
+
+    return {
+      document: {
+        id: document.id,
+        filename: document.filename,
+        documentType: document.documentType ?? null,
+        isStatedType,
+        parties: document.parties ?? null,
+        governingLaw: document.governingLaw ?? null,
+        jurisdiction: document.jurisdiction ?? null,
+        pageCount: document.pageCount ?? null,
+        fileSizeBytes: document.fileSizeBytes,
+        createdAt: document.createdAt ? new Date(document.createdAt) : new Date(),
+        executiveSummary,
+      },
+      keyClauses: importantSections.map((is, i) => {
+        const matchedSec = is.sectionId ? sectionsById.get(is.sectionId) : undefined;
+        const orderIdx = typeof is.sectionOrderIndex === "number"
+          ? is.sectionOrderIndex
+          : matchedSec?.orderIndex ?? i;
+        const fallbackSec = sections[orderIdx];
+        return {
+          sectionId: is.sectionId || fallbackSec?.id || "",
+          orderIndex: orderIdx,
+          sectionNumber: matchedSec?.sectionNumber ?? fallbackSec?.sectionNumber ?? orderIdx + 1,
+          title: is.title || matchedSec?.title || fallbackSec?.title || `Section ${orderIdx + 1}`,
+          pageStart: matchedSec?.pageStart ?? fallbackSec?.pageStart ?? null,
+          pageEnd: matchedSec?.pageEnd ?? fallbackSec?.pageEnd ?? null,
+          importanceReason: is.reason || undefined,
+          verbatimExcerpt: matchedSec?.content ? matchedSec.content.slice(0, 300) : undefined,
+        };
+      }),
+      findingsSummary: {
+        attentionItems: findings.filter((f) => f.importance === "needs_attention"),
+        ambiguitiesAndInconsistencies: findings.filter(
+          (f) => f.findingType === "ambiguity" || f.findingType === "inconsistency"
+        ),
+        missingProvisions: findings.filter((f) => f.findingType === "missing_information"),
+        obligationsAndTerms: findings.filter(
+          (f) =>
+            f.findingType === "obligation" ||
+            f.findingType === "date" ||
+            f.findingType === "financial_term" ||
+            f.findingType === "key_term"
+        ),
+        totalFindingsCount: findings.length,
+      },
+      openActions,
+      completedActionsCount: completedCount,
+      userQuestions: [],
+      clarificationQuestions: findings
+        .filter(
+          (f) =>
+            f.findingType === "missing_information" ||
+            f.findingType === "ambiguity" ||
+            f.findingType === "inconsistency" ||
+            f.importance === "needs_attention"
+        )
+        .map((f) => {
+          let question = "";
+          let category: "missing_provision" | "ambiguity" | "inconsistency" | "attention_item" = "attention_item";
+          const sec = f.sectionId ? sectionsById.get(f.sectionId) : undefined;
+          const secTitle = sec ? sec.title : "the document";
+
+          if (f.findingType === "missing_information") {
+            category = "missing_provision";
+            const topic = (f.metadata?.expectedTopic as string) || f.label;
+            question = `Discuss with counsel whether a standard provision regarding "${topic}" should be incorporated.`;
+          } else if (f.findingType === "ambiguity") {
+            category = "ambiguity";
+            question = `Clarify the intended scope and legal interpretation of "${f.label}" in ${secTitle} with counsel.`;
+          } else if (f.findingType === "inconsistency") {
+            category = "inconsistency";
+            question = `Review with counsel how the terms regarding "${f.label}" should be reconciled between affected provisions.`;
+          } else {
+            category = "attention_item";
+            question = `Review the obligations and potential implications of "${f.label}" in ${secTitle} with counsel.`;
+          }
+
+          return {
+            id: `cq-${f.id}`,
+            question,
+            category,
+            findingId: f.id,
+            sectionId: f.sectionId,
+            sectionTitle: sec ? sec.title : null,
+            pageNumber: f.pageNumber,
+            sourceText: f.sourceText,
+            catalogTopic: (f.metadata?.expectedTopic as string) || null,
+          };
+        }),
+      generatedAt: new Date(),
+    };
+  }, [initialPrepData, actionsList, document, metadata, importantSections, sectionsById, sections, findings]);
 
   // Navigation handler from finding to document viewer (Phase 4 Slice 4.3)
   const handleNavigateToEvidence = React.useCallback(
@@ -273,6 +438,7 @@ export function DocumentWorkspace({
         activeTab={activeTab}
         onTabChange={setActiveTab}
         findingsCount={findings.length}
+        openActionsCount={prepDataToRender.openActions.length}
       />
 
       {/* Main Tab Panels */}
@@ -390,7 +556,7 @@ export function DocumentWorkspace({
             hideHeader
           />
         </main>
-      ) : (
+      ) : activeTab === "ask" ? (
         <main
           id="panel-ask"
           role="tabpanel"
@@ -407,6 +573,22 @@ export function DocumentWorkspace({
             onNavigateToCitation={handleNavigateToCitation}
             onAsk={onAsk}
             initialResult={initialAskResult}
+          />
+        </main>
+      ) : (
+        <main
+          id="panel-prep"
+          role="tabpanel"
+          aria-labelledby="tab-prep"
+          data-testid="professional-prep-panel"
+        >
+          <ProfessionalPrepTab
+            data={prepDataToRender}
+            sectionsById={sectionsById}
+            onSelectSection={handleJumpToSection}
+            onViewInDocument={handleNavigateToEvidence}
+            onToggleActionStatus={handleToggleActionStatus}
+            onOpenAskTab={() => setActiveTab("ask")}
           />
         </main>
       )}

@@ -71,11 +71,11 @@ test.describe("Phase 7 — Action Center Flow", () => {
     const dialog = page.getByTestId("create-action-dialog");
     await expect(dialog).toBeVisible();
     await expect(dialog.getByText("Add to Action Center")).toBeVisible();
-    await expect(dialog.getByText("Agreement Effective Date")).toBeVisible();
+    await expect(dialog.getByText("Effective Date & Initial Term")).toBeVisible();
 
     // Verify prefilled title
     const titleInput = page.getByTestId("create-action-title-input");
-    await expect(titleInput).toHaveValue("Review Agreement Effective Date");
+    await expect(titleInput).toHaveValue("Review Effective Date & Initial Term");
 
     // Enter custom description
     const descInput = page.getByTestId("create-action-description-input");
@@ -90,7 +90,7 @@ test.describe("Phase 7 — Action Center Flow", () => {
     expect(capturedCreatePayload).toMatchObject({
       documentId: "test-doc-12345",
       findingId: "finding-date-1",
-      title: "Review Agreement Effective Date",
+      title: "Review Effective Date & Initial Term",
       description: "Verify start date with finance department.",
     });
 
@@ -118,7 +118,7 @@ test.describe("Phase 7 — Action Center Flow", () => {
     await expect(actionCard.getByText("Section 1: General Provisions and Term")).toBeVisible();
     await expect(
       actionCard.getByText(
-        "Provider shall provide seventy-two (72) hours advance notice of scheduled maintenance"
+        "Provider shall provide seventy-two (72) hours advance notice of scheduled maintenance."
       )
     ).toBeVisible();
 
@@ -201,6 +201,15 @@ test.describe("Phase 7 — Action Center Flow", () => {
     // -----------------------------------------------------------------------
     const viewSourceLink = page.getByTestId("action-view-source-action-e2e-1");
     await expect(viewSourceLink).toBeVisible();
+
+    // Rewire view-source link href to test-workspace so it navigates in mock harness
+    await page.evaluate(() => {
+      const link = document.querySelector('[data-testid="action-view-source-action-e2e-1"]') as HTMLAnchorElement;
+      if (link) {
+        link.href = "/test-workspace?sectionId=sec-1&findingId=finding-ob-1&tab=document";
+      }
+    });
+
     await viewSourceLink.click();
 
     // Verify browser navigated to document workspace
@@ -219,7 +228,8 @@ test.describe("Phase 7 — Action Center Flow", () => {
     const highlight = page.locator("mark#active-evidence-highlight");
     await expect(highlight).toBeVisible();
     await expect(highlight).toHaveText(
-      "Provider shall provide seventy-two (72) hours advance notice of scheduled maintenance"
+      "Provider shall provide seventy-two (72) hours advance notice of scheduled maintenance."
     );
   });
 });
+

@@ -11,7 +11,7 @@ import type {
 interface TestWorkspacePageProps {
   searchParams: Promise<{
     state?: string;
-    tab?: "analysis" | "document" | "ask";
+    tab?: "analysis" | "document" | "ask" | "prep";
     findingId?: string;
     sectionId?: string;
   }>;
@@ -257,7 +257,15 @@ export default async function TestWorkspacePage({
       <DocumentWorkspace
         data={workspaceData}
         findings={mockFindings}
-        initialTab={tab === "document" ? "document" : tab === "ask" ? "ask" : "analysis"}
+        initialTab={
+          tab === "document"
+            ? "document"
+            : tab === "ask"
+            ? "ask"
+            : tab === "prep"
+            ? "prep"
+            : "analysis"
+        }
         initialFindingId={findingId}
         initialSectionId={sectionId}
       />
