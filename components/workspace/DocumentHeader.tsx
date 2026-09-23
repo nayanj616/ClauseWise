@@ -9,6 +9,7 @@ import {
   Sparkles,
   FileText,
   Info,
+  MessageSquare,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -22,8 +23,8 @@ import {
 export interface DocumentHeaderProps {
   document: WorkspaceDocument;
   sectionCount: number;
-  activeTab: "analysis" | "document";
-  onTabChange: (tab: "analysis" | "document") => void;
+  activeTab: "analysis" | "document" | "ask";
+  onTabChange: (tab: "analysis" | "document" | "ask") => void;
   findingsCount?: number;
   className?: string;
 }
@@ -286,6 +287,24 @@ export function DocumentHeader({
               {sectionCount}
             </span>
           )}
+        </button>
+
+        <button
+          type="button"
+          role="tab"
+          id="tab-ask"
+          aria-selected={activeTab === "ask"}
+          aria-controls="panel-ask"
+          onClick={() => onTabChange("ask")}
+          className={cn(
+            "flex items-center gap-2 px-3.5 py-2 text-sm font-medium rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            activeTab === "ask"
+              ? "bg-primary text-primary-foreground shadow-sm"
+              : "text-muted-foreground hover:bg-muted/70 hover:text-foreground"
+          )}
+        >
+          <MessageSquare size={15} aria-hidden="true" />
+          <span>Ask</span>
         </button>
       </div>
     </header>

@@ -153,3 +153,21 @@ export type {
   HighlightRange,
   HighlightSegments,
 } from "@/lib/workspace/highlight";
+
+// ---------------------------------------------------------------------------
+// Document Q&A (Phase 5)
+// ---------------------------------------------------------------------------
+
+export type {
+  RetrievalConfig,
+  RetrievalResult,
+  RetrievedChunk,
+} from "@/lib/services/retrieval-service";
+
+export type {
+  AnswerQuestionInput,
+  AnswerQuestionResult,
+  QaCitation,
+  ModelQaOutput,
+} from "@/lib/services/qa-service";
+

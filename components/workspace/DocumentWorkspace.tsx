@@ -7,6 +7,8 @@ import type {
   DocumentFinding,
   ValidatedImportantSection,
   WorkspaceSection,
+  QaCitation,
+  AnswerQuestionResult,
 } from "@/types";
 import { DocumentHeader } from "./DocumentHeader";
 import { DocumentOverview } from "./DocumentOverview";
@@ -17,6 +19,7 @@ import { DocumentViewer } from "./DocumentViewer";
 import { AttentionItemsSummary } from "./AttentionItemsSummary";
 import { FormattedDatesList } from "./FormattedDatesList";
 import { FormattedFinancialList } from "./FormattedFinancialList";
+import { AskPanel } from "./AskPanel";
 import {
   DocumentProcessingState,
   DocumentErrorState,
@@ -28,7 +31,9 @@ export interface DocumentWorkspaceProps {
   data: DocumentWorkspaceData;
   findings?: DocumentFinding[];
   className?: string;
-  initialTab?: "analysis" | "document";
+  initialTab?: "analysis" | "document" | "ask";
+  onAsk?: (documentId: string, question: string) => Promise<AnswerQuestionResult>;
+  initialAskResult?: AnswerQuestionResult | null;
 }
 
 /**
@@ -50,11 +55,13 @@ export function DocumentWorkspace({
   findings = [],
   className,
   initialTab = "analysis",
+  onAsk,
+  initialAskResult,
 }: DocumentWorkspaceProps) {
   const { document, sections } = data;
 
-  // Tab state: "analysis" (intelligence overview & findings) vs "document" (verbatim section text)
-  const [activeTab, setActiveTab] = React.useState<"analysis" | "document">(initialTab);
+  // Tab state: "analysis" (intelligence overview & findings) vs "document" (verbatim section text) vs "ask" (document Q&A)
+  const [activeTab, setActiveTab] = React.useState<"analysis" | "document" | "ask">(initialTab);
 
   // Selected finding state
   const [selectedFindingId, setSelectedFindingId] = React.useState<string | null>(
@@ -153,6 +160,30 @@ export function DocumentWorkspace({
       }
     },
     [sections.length, sectionsById]
+  );
+
+  // Navigation handler from QA citation to document viewer (Phase 5 Slice 5.3)
+  const handleNavigateToCitation = React.useCallback(
+    (citation: QaCitation | null | undefined) => {
+      if (!citation) return;
+
+      // 1. Identify and select target section if present
+      if (citation.sectionId) {
+        const targetSection = sectionsById.get(citation.sectionId);
+        if (targetSection) {
+          setSelectedSectionIndex(targetSection.orderIndex);
+        }
+      }
+
+      // 2. Set active evidence excerpt for highlighting
+      if (citation.sourceText) {
+        setActiveEvidenceExcerpt(citation.sourceText);
+      }
+
+      // 3. Switch to Document tab
+      setActiveTab("document");
+    },
+    [sectionsById]
   );
 
   // 1. Error state: render user-safe error message
@@ -291,7 +322,7 @@ export function DocumentWorkspace({
             </div>
           </section>
         </main>
-      ) : (
+      ) : activeTab === "document" ? (
         <main
           id="panel-document"
           role="tabpanel"
@@ -306,6 +337,22 @@ export function DocumentWorkspace({
             onSelectIndex={setSelectedSectionIndex}
             highlightExcerpt={activeEvidenceExcerpt}
             hideHeader
+          />
+        </main>
+      ) : (
+        <main
+          id="panel-ask"
+          role="tabpanel"
+          aria-labelledby="tab-ask"
+          data-testid="document-ask-panel"
+        >
+          <AskPanel
+            documentId={document.id}
+            documentTitle={document.filename}
+            sectionsById={sectionsById}
+            onNavigateToCitation={handleNavigateToCitation}
+            onAsk={onAsk}
+            initialResult={initialAskResult}
           />
         </main>
       )}
