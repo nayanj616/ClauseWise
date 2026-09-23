@@ -86,11 +86,11 @@ test.describe("Phase 6 — Contextual Assistant Flow", () => {
     await documentTab.click();
     await expect(documentTab).toHaveAttribute("aria-selected", "true");
 
-    // 2. Click "Ask about this section" on Section 2 (Fees, Invoicing, and Payment Terms)
-    const askAboutSectionButtons = page.getByTestId("ask-about-section-button");
-    await expect(askAboutSectionButtons.first()).toBeVisible();
-    // Click the button for Section 2 (index 1)
-    await askAboutSectionButtons.nth(1).click();
+    // 2. Select Section 2 in sidebar and click "Ask about this section"
+    await page.getByRole("button", { name: /Section 2: Fees, Invoicing/i }).click();
+    const askAboutSectionButton = page.getByTestId("ask-about-section-button");
+    await expect(askAboutSectionButton).toBeVisible();
+    await askAboutSectionButton.click();
 
     // 3. Verify automatic tab switch to "Ask"
     const askTab = page.getByRole("tab", { name: "Ask" });
@@ -145,9 +145,9 @@ test.describe("Phase 6 — Contextual Assistant Flow", () => {
         // Turn 2 SSE payload (after switching context)
         const sseStream =
           "event: status\n" +
-          'data: {"type":"status","phase":"generating_answer","message":"Analyzing confidentiality provisions…"}\n\n' +
+          'data: {"type":"status","phase":"generating_answer","message":"Analyzing governing law provisions…"}\n\n' +
           "event: complete\n" +
-          'data: {"type":"complete","messageId":"msg-asst-2","answer":"Confidential Information must be held for five years.","citations":[{"chunkId":"chunk-3","documentId":"test-doc-12345","sectionId":"sec-3","sourceText":"Confidential Information shall remain confidential for five (5) years.","pageNumber":3,"chunkIndex":1}],"hasSufficientEvidence":true,"isGrounded":true,"citationValidationPassed":true,"sectionId":"sec-3","fallbackUsed":false}\n\n';
+          'data: {"type":"complete","messageId":"msg-asst-2","answer":"The agreement is governed by Delaware law with arbitration in Wilmington.","citations":[{"chunkId":"chunk-3","documentId":"test-doc-12345","sectionId":"sec-3","sourceText":"This Agreement shall be governed by and construed in accordance with the laws of the State of Delaware.","pageNumber":3,"chunkIndex":1}],"hasSufficientEvidence":true,"isGrounded":true,"citationValidationPassed":true,"sectionId":"sec-3","fallbackUsed":false}\n\n';
 
         await route.fulfill({
           status: 200,
@@ -187,11 +187,11 @@ test.describe("Phase 6 — Contextual Assistant Flow", () => {
     await scopeSelector.selectOption("sec-3");
 
     // Banner must update to Section 3
-    await expect(contextBanner).toContainText("Section 3: Intellectual Property, Warranties, and Termination");
+    await expect(contextBanner).toContainText("Section 3: Governing Law and Dispute Resolution");
     await expect(contextBanner).toContainText("Page 3");
 
     // 11. Ask second contextual question with new scope
-    await questionInput.fill("How long is confidentiality protected?");
+    await questionInput.fill("What is the governing law and arbitration location?");
     await submitBtn.click();
 
     // Verify turn 2 request carried sectionId: "sec-3"
@@ -208,4 +208,3 @@ test.describe("Phase 6 — Contextual Assistant Flow", () => {
     await expect(scopeSelector).toHaveValue("");
   });
 });
-
