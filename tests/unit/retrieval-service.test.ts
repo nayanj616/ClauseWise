@@ -151,6 +151,7 @@ function createMockChunk(overrides?: Partial<DocumentChunk>): DocumentChunk {
     content: "Fees must be remitted within thirty (30) days of invoice date.",
     pageNumber: 2,
     tokenCount: 15,
+    embedding: null,
     createdAt: new Date("2026-09-21T09:01:00Z"),
     updatedAt: new Date("2026-09-21T09:01:00Z"),
     ...overrides,

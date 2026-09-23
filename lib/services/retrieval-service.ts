@@ -16,7 +16,8 @@
  * SERVER-SIDE ONLY — do not import in client components.
  */
 
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNotNull, sql, cosineDistance } from "drizzle-orm";
+import { z } from "zod";
 import { db } from "@/lib/db";
 import {
   documents,
@@ -35,6 +36,91 @@ export class DatabaseError extends Error {
     super(message, options);
     this.name = "DatabaseError";
   }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 5.1 Retrieval Errors
+// ---------------------------------------------------------------------------
+
+export class RetrievalError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = "RetrievalError";
+  }
+}
+
+export class RetrievalValidationError extends RetrievalError {
+  readonly issues?: z.ZodIssue[];
+  constructor(message: string, issues?: z.ZodIssue[]) {
+    super(message);
+    this.name = "RetrievalValidationError";
+    this.issues = issues;
+  }
+}
+
+export class DocumentAccessError extends RetrievalError {
+  constructor(message = "Document not found or access denied") {
+    super(message);
+    this.name = "DocumentAccessError";
+  }
+}
+
+export class EmbeddingError extends RetrievalError {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = "EmbeddingError";
+  }
+}
+
+export class VectorSearchError extends RetrievalError {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = "VectorSearchError";
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 5.1 Retrieval Contracts & Schemas
+// ---------------------------------------------------------------------------
+
+export const RetrievalConfigSchema = z.object({
+  /** Maximum number of chunks to retrieve (default: 5, range: 1..20) */
+  topK: z.number().int().min(1).max(20).default(5),
+  /** Minimum cosine similarity threshold [0.0..1.0] (default: 0.2) */
+  minSimilarity: z.number().min(0).max(1).default(0.2),
+});
+
+export const DocumentRetrievalInputSchema = z.object({
+  documentId: z.string().uuid("Invalid document ID format"),
+  userId: z.string().trim().min(1, "User ID is required"),
+  question: z
+    .string()
+    .trim()
+    .min(1, "Question must not be empty")
+    .max(2000, "Question must not exceed 2000 characters"),
+  config: RetrievalConfigSchema.optional().default({}),
+});
+
+export type RetrievalConfig = z.infer<typeof RetrievalConfigSchema>;
+export type DocumentRetrievalInput = z.input<typeof DocumentRetrievalInputSchema>;
+
+export interface RetrievedChunk {
+  chunkId: string;
+  documentId: string;
+  sectionId: string | null;
+  content: string;
+  pageNumber: number | null;
+  similarity: number;
+  chunkIndex: number;
+  tokenCount: number | null;
+}
+
+export interface RetrievalResult {
+  documentId: string;
+  question: string;
+  chunks: RetrievedChunk[];
+  hasSufficientEvidence: boolean;
+  totalChunksExamined: number;
 }
 
 export interface FindingWithEvidence {
@@ -308,3 +394,192 @@ export async function findingWithEvidence(
     });
   }
 }
+
+// ---------------------------------------------------------------------------
+// Error Sanitization Helper
+// ---------------------------------------------------------------------------
+
+function sanitizeError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message
+      .replace(/sk-[a-zA-Z0-9_\-]{15,}/gi, "[REDACTED_API_KEY]")
+      .replace(/postgres:\/\/[^@]+@/gi, "postgres://[REDACTED]@")
+      .replace(/Bearer\s+[a-zA-Z0-9_\-\.]+/gi, "Bearer [REDACTED]");
+  }
+  return "Unknown error";
+}
+
+// ---------------------------------------------------------------------------
+// Phase 5.1 Retrieval Service: Evidence Retrieval via pgvector
+// ---------------------------------------------------------------------------
+
+/**
+ * Retrieves relevant document chunks for a question using pgvector cosine similarity search.
+ *
+ * Invariants:
+ * 1. Strict Tenant Authorization: Verifies document ownership against userId before any embedding
+ *    or vector query. Does not leak document existence across tenants.
+ * 2. Strict Document Isolation: Chunks are filtered by documentId, preventing cross-document leakage.
+ * 3. Honest Evidence Boundary: Distinguishes between query failures (VectorSearchError) and
+ *    zero chunks / below-threshold chunks ({ hasSufficientEvidence: false, chunks: [] }).
+ *    Never silently falls back to general LLM knowledge.
+ * 4. Citation Preservation: Every returned chunk retains chunkId, documentId, sectionId,
+ *    pageNumber, content, similarity score, and chunkIndex for downstream citation generation.
+ *
+ * @param rawInput - Document ID, user ID, user question, and optional retrieval config
+ * @returns Structured RetrievalResult containing ranked evidence chunks
+ */
+export async function retrieveDocumentEvidence(
+  rawInput: DocumentRetrievalInput
+): Promise<RetrievalResult> {
+  // 1. Zod input validation
+  const parseResult = DocumentRetrievalInputSchema.safeParse(rawInput);
+  if (!parseResult.success) {
+    const issueMessages = parseResult.error.issues.map((i) => i.message).join("; ");
+    throw new RetrievalValidationError(
+      `Invalid retrieval input: ${issueMessages}`,
+      parseResult.error.issues
+    );
+  }
+
+  const { documentId, userId, question, config } = parseResult.data;
+  const topK = config.topK ?? 5;
+  const minSimilarity = config.minSimilarity ?? 0.2;
+
+  // 2. Ownership & Tenant Authorization Boundary
+  // Query document strictly scoped by documentId AND userId.
+  // CRITICAL SECURITY RULE: Return identical sanitized error for "not found"
+  // and "not owned" to prevent becoming a document-existence oracle.
+  let doc: { id: string } | undefined;
+  try {
+    const [foundDoc] = await db
+      .select({ id: documents.id })
+      .from(documents)
+      .where(
+        and(
+          eq(documents.id, documentId),
+          eq(documents.userId, userId)
+        )
+      )
+      .limit(1);
+    doc = foundDoc;
+  } catch (error) {
+    console.error(
+      `[retrieveDocumentEvidence] DB error checking ownership for doc ${documentId}:`,
+      sanitizeError(error)
+    );
+    throw new VectorSearchError("Failed to verify document access", { cause: error });
+  }
+
+  if (!doc) {
+    throw new DocumentAccessError("Document not found or access denied");
+  }
+
+  // 3. Question Embedding via existing OpenAI integration
+  let queryEmbedding: number[];
+  try {
+    const { embedText } = await import("@/lib/embeddings/embeddings-client");
+    queryEmbedding = await embedText(question);
+  } catch (error) {
+    console.error(
+      `[retrieveDocumentEvidence] Embedding failed for doc ${documentId}:`,
+      sanitizeError(error)
+    );
+    throw new EmbeddingError("Failed to generate embedding for retrieval question", {
+      cause: error,
+    });
+  }
+
+  // 4. pgvector Similarity Search with Strict Document Isolation
+  const distanceExpr = cosineDistance(documentChunks.embedding, queryEmbedding);
+  const similarityExpr = sql<number>`1 - (${distanceExpr})`;
+
+  let rows: Array<{
+    chunkId: string;
+    documentId: string;
+    sectionId: string;
+    content: string;
+    pageNumber: number | null;
+    tokenCount: number | null;
+    chunkIndex: number;
+    similarity: unknown;
+  }>;
+
+  try {
+    rows = await db
+      .select({
+        chunkId: documentChunks.id,
+        documentId: documentChunks.documentId,
+        sectionId: documentChunks.sectionId,
+        content: documentChunks.content,
+        pageNumber: documentChunks.pageNumber,
+        tokenCount: documentChunks.tokenCount,
+        chunkIndex: documentChunks.chunkIndex,
+        similarity: similarityExpr,
+      })
+      .from(documentChunks)
+      .where(
+        and(
+          eq(documentChunks.documentId, documentId),
+          isNotNull(documentChunks.embedding)
+        )
+      )
+      .orderBy(asc(distanceExpr))
+      .limit(topK);
+  } catch (error) {
+    console.error(
+      `[retrieveDocumentEvidence] Vector search failed on doc ${documentId}:`,
+      sanitizeError(error)
+    );
+    throw new VectorSearchError("Failed to query document chunks via vector similarity", {
+      cause: error,
+    });
+  }
+
+  // 5. Zero indexed/embedded chunks: Normal retrieval outcome (not an error)
+  if (!rows || rows.length === 0) {
+    return {
+      documentId,
+      question,
+      chunks: [],
+      hasSufficientEvidence: false,
+      totalChunksExamined: 0,
+    };
+  }
+
+  // 6. Thresholding & relevance evaluation
+  const qualifiedChunks: RetrievedChunk[] = [];
+  for (const row of rows) {
+    const rawSim = Number(row.similarity);
+    const similarity = isNaN(rawSim)
+      ? 0
+      : Math.max(-1, Math.min(1, Math.round(rawSim * 10000) / 10000));
+
+    if (similarity >= minSimilarity) {
+      qualifiedChunks.push({
+        chunkId: row.chunkId,
+        documentId: row.documentId,
+        sectionId: row.sectionId ?? null,
+        content: row.content,
+        pageNumber: row.pageNumber,
+        similarity,
+        chunkIndex: row.chunkIndex,
+        tokenCount: row.tokenCount,
+      });
+    }
+  }
+
+  return {
+    documentId,
+    question,
+    chunks: qualifiedChunks,
+    hasSufficientEvidence: qualifiedChunks.length > 0,
+    totalChunksExamined: rows.length,
+  };
+}
+
+/**
+ * Alias for retrieveDocumentEvidence matching the Phase 5 specification.
+ */
+export const semanticSearch = retrieveDocumentEvidence;
+

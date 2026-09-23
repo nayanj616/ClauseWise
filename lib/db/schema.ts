@@ -14,6 +14,7 @@ import {
   primaryKey,
   jsonb,
   index,
+  vector,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 
@@ -201,6 +202,11 @@ export const documentChunks = pgTable("document_chunks", {
   chunkIndex: integer("chunk_index").notNull(),
   /** Verbatim chunk text produced by deterministic chunker */
   content: text("content").notNull(),
+  /**
+   * OpenAI text-embedding-3-small 1536-dimensional float vector for pgvector similarity search.
+   * Nullable until generated during embedding indexing.
+   */
+  embedding: vector("embedding", { dimensions: 1536 }),
   /**
    * Source page reference (propagated format-agnostically from section pageStart;
    * null when physical page numbers do not exist, e.g. DOCX/TXT)
