@@ -16,6 +16,15 @@ import { test, expect } from "@playwright/test";
 
 test.describe("Ask UI & Citation Navigation Flow", () => {
   test.beforeEach(async ({ page }) => {
+    // Intercept conversations endpoint to trigger clean Phase 5.3 single-turn fallback
+    await page.route("**/api/documents/**/conversations**", async (route) => {
+      await route.fulfill({
+        status: 404,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "Document not found or access denied" }),
+      });
+    });
+
     await page.goto("/test-workspace");
     await expect(page.getByTestId("document-workspace-viewer")).toBeVisible();
   });
@@ -87,9 +96,12 @@ test.describe("Ask UI & Citation Navigation Flow", () => {
     await expect(page.getByTestId("ask-grounded-answer")).toBeVisible();
     await expect(page.getByText("Grounded in Evidence")).toBeVisible();
     await expect(
-      page.getByText(
-        "Customer agrees to pay all undisputed invoices within thirty (30) days of receipt."
-      )
+      page
+        .getByTestId("ask-grounded-answer")
+        .getByText(
+          "Customer agrees to pay all undisputed invoices within thirty (30) days of receipt."
+        )
+        .first()
     ).toBeVisible();
 
     // 8. Verify citation card

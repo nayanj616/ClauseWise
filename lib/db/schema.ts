@@ -11,6 +11,7 @@ import {
   timestamp,
   uuid,
   integer,
+  boolean,
   primaryKey,
   jsonb,
   index,
@@ -277,6 +278,73 @@ export const documentFindings = pgTable("document_findings", {
 }));
 
 // ---------------------------------------------------------------------------
+// Conversation & Message — Phase 5 Slice 5.4
+// Represents a persistent document-scoped Q&A thread and its turns.
+// ---------------------------------------------------------------------------
+
+export interface QaCitation {
+  chunkId: string;
+  documentId: string;
+  sectionId: string | null;
+  pageNumber: number | null;
+  sourceText: string;
+  similarity: number;
+}
+
+export const conversations = pgTable(
+  "conversations",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    documentId: uuid("document_id")
+      .notNull()
+      .references(() => documents.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    title: text("title").notNull().default("New Conversation"),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (t) => ({
+    documentIdIdx: index("idx_conversations_document_id").on(t.documentId),
+    userIdIdx: index("idx_conversations_user_id").on(t.userId),
+    userDocIdx: index("idx_conversations_user_doc").on(t.userId, t.documentId),
+  })
+);
+
+export const MESSAGE_ROLES = ["user", "assistant"] as const;
+export type MessageRole = (typeof MESSAGE_ROLES)[number];
+
+export const messages = pgTable(
+  "messages",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    role: text("role", { enum: MESSAGE_ROLES }).notNull(),
+    content: text("content").notNull(),
+    /** Authoritative verified citations (null for user messages and uncited assistant answers) */
+    citations: jsonb("citations").$type<QaCitation[]>(),
+    /** Grounding flags (null for user messages; booleans only for completed assistant answers) */
+    hasSufficientEvidence: boolean("has_sufficient_evidence"),
+    isGrounded: boolean("is_grounded"),
+    citationValidationPassed: boolean("citation_validation_passed"),
+    /** Extra telemetry or streaming metrics */
+    metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (t) => ({
+    conversationIdIdx: index("idx_messages_conversation_id").on(t.conversationId),
+    conversationCreatedAtIdx: index("idx_messages_convo_created").on(t.conversationId, t.createdAt),
+  })
+);
+
+// ---------------------------------------------------------------------------
 // Relations (Drizzle relational query API)
 // ---------------------------------------------------------------------------
 
@@ -284,6 +352,7 @@ export const usersRelations = relations(users, ({ many }) => ({
   accounts: many(accounts),
   sessions: many(sessions),
   documents: many(documents),
+  conversations: many(conversations),
 }));
 
 export const accountsRelations = relations(accounts, ({ one }) => ({
@@ -299,6 +368,7 @@ export const documentsRelations = relations(documents, ({ one, many }) => ({
   sections: many(documentSections),
   chunks: many(documentChunks),
   findings: many(documentFindings),
+  conversations: many(conversations),
 }));
 
 export const documentSectionsRelations = relations(documentSections, ({ one, many }) => ({
@@ -337,6 +407,25 @@ export const documentFindingsRelations = relations(documentFindings, ({ one }) =
   }),
 }));
 
+export const conversationsRelations = relations(conversations, ({ one, many }) => ({
+  document: one(documents, {
+    fields: [conversations.documentId],
+    references: [documents.id],
+  }),
+  user: one(users, {
+    fields: [conversations.userId],
+    references: [users.id],
+  }),
+  messages: many(messages),
+}));
+
+export const messagesRelations = relations(messages, ({ one }) => ({
+  conversation: one(conversations, {
+    fields: [messages.conversationId],
+    references: [conversations.id],
+  }),
+}));
+
 // ---------------------------------------------------------------------------
 // Inferred types — used throughout the codebase instead of raw DB rows
 // ---------------------------------------------------------------------------
@@ -351,5 +440,9 @@ export type DocumentChunk = typeof documentChunks.$inferSelect;
 export type NewDocumentChunk = typeof documentChunks.$inferInsert;
 export type DocumentFinding = typeof documentFindings.$inferSelect;
 export type NewDocumentFinding = typeof documentFindings.$inferInsert;
+export type Conversation = typeof conversations.$inferSelect;
+export type NewConversation = typeof conversations.$inferInsert;
+export type Message = typeof messages.$inferSelect;
+export type NewMessage = typeof messages.$inferInsert;
 
 

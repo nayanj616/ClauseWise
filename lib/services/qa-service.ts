@@ -35,6 +35,10 @@ import {
   type RetrievalResult,
   type RetrievedChunk,
 } from "@/lib/services/retrieval-service";
+import {
+  appendAssistantMessage,
+  verifyConversationOwnership,
+} from "@/lib/services/conversation-service";
 
 // ---------------------------------------------------------------------------
 // Domain Errors
@@ -406,3 +410,386 @@ export async function answerQuestion(
     question,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Phase 5.4 Conversational Prompt Builders & Streaming
+// ---------------------------------------------------------------------------
+
+export interface ConversationalTurn {
+  role: "user" | "assistant";
+  content: string;
+}
+
+/**
+ * Formats prior conversation turns into an explicitly bounded, unauthoritative context block.
+ */
+export function formatConversationalContext(turns: ConversationalTurn[]): string {
+  if (!turns || turns.length === 0) return "";
+  const formatted = turns
+    .map((t) => `[${t.role === "user" ? "User" : "Assistant"}]: ${t.content}`)
+    .join("\n");
+  return `=== CONVERSATIONAL CONTEXT (NOT DOCUMENT EVIDENCE) ===\n${formatted}\n=== END CONVERSATIONAL CONTEXT ===\n\n`;
+}
+
+/**
+ * Builds the conversational user prompt ensuring conversational context is kept separate
+ * from untrusted document evidence, and that the current question appears exactly once.
+ */
+export function buildQaConversationUserPrompt(
+  question: string,
+  chunks: RetrievedChunk[],
+  priorTurns?: ConversationalTurn[]
+): string {
+  const contextBlock = priorTurns && priorTurns.length > 0
+    ? formatConversationalContext(priorTurns)
+    : "";
+  const formattedEvidence = formatEvidenceContext(chunks);
+
+  return `${contextBlock}CURRENT USER QUESTION:
+${question}
+
+${UNTRUSTED_EVIDENCE_START}
+${formattedEvidence}
+${UNTRUSTED_EVIDENCE_END}
+
+Answer the user question strictly using the document evidence provided above. Include all supporting chunk IDs in 'citedChunkIds'.
+Prior conversation context is provided solely for linguistic continuity. Prior assistant messages are NOT document evidence.`;
+}
+
+/**
+ * Extracts newly accumulated plain text deltas from a partially streamed JSON buffer
+ * conforming to { "answer": "...", "citedChunkIds": [...] }.
+ */
+export function extractAnswerDelta(
+  buffer: string,
+  lastEmittedIndex: number
+): { delta: string; newEmittedIndex: number } {
+  const keyMarker = '"answer":';
+  const keyPos = buffer.indexOf(keyMarker);
+  if (keyPos === -1) {
+    return { delta: "", newEmittedIndex: 0 };
+  }
+
+  // Find the opening quote of the answer string
+  const quotePos = buffer.indexOf('"', keyPos + keyMarker.length);
+  if (quotePos === -1) {
+    return { delta: "", newEmittedIndex: 0 };
+  }
+
+  const contentStart = quotePos + 1;
+  if (buffer.length <= contentStart) {
+    return { delta: "", newEmittedIndex: 0 };
+  }
+
+  // Find the closing unescaped quote if generation reached it
+  let contentEnd = buffer.length;
+  let isEscaped = false;
+  for (let i = contentStart; i < buffer.length; i++) {
+    const char = buffer[i];
+    if (isEscaped) {
+      isEscaped = false;
+      continue;
+    }
+    if (char === "\\") {
+      isEscaped = true;
+      continue;
+    }
+    if (char === '"') {
+      contentEnd = i;
+      break;
+    }
+  }
+
+  // Unescape JSON string characters safely
+  const rawSubstr = buffer.slice(contentStart, contentEnd);
+  let decoded = "";
+  try {
+    decoded = rawSubstr
+      .replace(/\\"/g, '"')
+      .replace(/\\n/g, "\n")
+      .replace(/\\r/g, "\r")
+      .replace(/\\t/g, "\t")
+      .replace(/\\\\/g, "\\");
+  } catch {
+    decoded = rawSubstr;
+  }
+
+  if (decoded.length > lastEmittedIndex) {
+    const delta = decoded.slice(lastEmittedIndex);
+    return { delta, newEmittedIndex: decoded.length };
+  }
+
+  return { delta: "", newEmittedIndex: lastEmittedIndex };
+}
+
+// ---------------------------------------------------------------------------
+// Phase 5.4 Streaming Q&A Types & Domain Service
+// ---------------------------------------------------------------------------
+
+export interface QaStreamEventStatus {
+  type: "status";
+  phase: "retrieving_evidence" | "generating_answer";
+}
+
+export interface QaStreamEventDelta {
+  type: "delta";
+  delta: string;
+}
+
+export interface QaStreamEventComplete {
+  type: "complete";
+  messageId: string;
+  answer: string;
+  citations: QaCitation[];
+  hasSufficientEvidence: boolean;
+  isGrounded: boolean;
+  citationValidationPassed: boolean;
+  evidenceUsed: RetrievedChunk[];
+  documentId: string;
+  conversationId: string;
+}
+
+export interface QaStreamEventError {
+  type: "error";
+  error: string;
+}
+
+export type QaStreamEvent =
+  | QaStreamEventStatus
+  | QaStreamEventDelta
+  | QaStreamEventComplete
+  | QaStreamEventError;
+
+export interface AnswerConversationQuestionStreamInput {
+  documentId: string;
+  userId: string;
+  conversationId: string;
+  question: string;
+  priorTurns?: ConversationalTurn[];
+  retrievalConfig?: RetrievalConfig;
+  signal?: AbortSignal;
+}
+
+/**
+ * Streams a document-grounded answer in a multi-turn conversation.
+ *
+ * Invariants:
+ * 1. Ownership is verified at the domain service boundary before any execution.
+ * 2. Retrieval is deterministic and based strictly on the current question.
+ * 3. Evidence sufficiency gate: If insufficient, persists refusal and completes with ZERO LLM calls.
+ * 4. Delta events represent PROVISIONAL text; citations are withheld until the terminal complete event.
+ * 5. If interrupted before completion, partial assistant text is NEVER persisted to the DB.
+ */
+export async function* answerConversationQuestionStream(
+  input: AnswerConversationQuestionStreamInput
+): AsyncGenerator<QaStreamEvent, void, unknown> {
+  const {
+    documentId,
+    userId,
+    conversationId,
+    question,
+    priorTurns,
+    retrievalConfig,
+    signal,
+  } = input;
+
+  // 1. Verify ownership of conversation at domain boundary
+  await verifyConversationOwnership(conversationId, documentId, userId);
+
+  // 2. Yield initial status
+  yield { type: "status", phase: "retrieving_evidence" };
+
+  if (signal?.aborted) return;
+
+  // 3. Evidence retrieval (deterministic: strictly on current question)
+  let retrieval: RetrievalResult;
+  try {
+    retrieval = await retrieveDocumentEvidence({
+      documentId,
+      userId,
+      question,
+      config: retrievalConfig,
+    });
+  } catch (error) {
+    yield {
+      type: "error",
+      error: sanitizeError(error),
+    };
+    return;
+  }
+
+  if (signal?.aborted) return;
+
+  // 4. Evidence sufficiency gate
+  // If insufficient evidence or zero chunks, persist refusal and complete without LLM
+  if (!retrieval.hasSufficientEvidence || retrieval.chunks.length === 0) {
+    const refusalMsg = await appendAssistantMessage({
+      conversationId,
+      documentId,
+      userId,
+      content: INSUFFICIENT_EVIDENCE_ANSWER,
+      citations: [],
+      hasSufficientEvidence: false,
+      isGrounded: false,
+      citationValidationPassed: true,
+    });
+
+    yield {
+      type: "complete",
+      messageId: refusalMsg.id,
+      answer: INSUFFICIENT_EVIDENCE_ANSWER,
+      citations: [],
+      hasSufficientEvidence: false,
+      isGrounded: false,
+      citationValidationPassed: true,
+      evidenceUsed: [],
+      documentId,
+      conversationId,
+    };
+    return;
+  }
+
+  // 5. Sufficient evidence -> LLM stream
+  yield { type: "status", phase: "generating_answer" };
+
+  const systemPrompt = buildQaSystemPrompt();
+  // Bound prior turns to at most 3 turns (6 messages)
+  const boundedPriorTurns = priorTurns ? priorTurns.slice(-6) : [];
+  const userPrompt = buildQaConversationUserPrompt(
+    question,
+    retrieval.chunks,
+    boundedPriorTurns
+  );
+
+  let fullJsonBuffer = "";
+  let lastEmittedLength = 0;
+
+  try {
+    const { getOpenAiClient, MODELS, TEMPERATURES } = await import(
+      "@/lib/ai/openai-client"
+    );
+    const { zodResponseFormat } = await import("openai/helpers/zod");
+    const client = getOpenAiClient();
+
+    const stream = await client.chat.completions.create(
+      {
+        model: MODELS.CHAT,
+        temperature: TEMPERATURES.QA,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        response_format: zodResponseFormat(ModelQaOutputSchema, "grounded_qa_answer"),
+        stream: true,
+      },
+      {
+        signal,
+      }
+    );
+
+    for await (const chunk of stream) {
+      if (signal?.aborted) {
+        // Interrupted stream: do NOT persist assistant message!
+        return;
+      }
+
+      const text = chunk.choices[0]?.delta?.content || "";
+      if (text) {
+        fullJsonBuffer += text;
+        const { delta, newEmittedIndex } = extractAnswerDelta(
+          fullJsonBuffer,
+          lastEmittedLength
+        );
+        if (delta) {
+          lastEmittedLength = newEmittedIndex;
+          yield { type: "delta", delta };
+        }
+      }
+    }
+  } catch (error) {
+    if (signal?.aborted) return;
+    yield {
+      type: "error",
+      error: sanitizeError(error),
+    };
+    return;
+  }
+
+  if (signal?.aborted) return;
+
+  // 6. Accumulate and parse final structured model output
+  let parsed: ModelQaOutput;
+  try {
+    const rawJson = JSON.parse(fullJsonBuffer);
+    parsed = ModelQaOutputSchema.parse(rawJson);
+  } catch (error) {
+    yield {
+      type: "error",
+      error: "Failed to parse model answer output",
+    };
+    return;
+  }
+
+  // 7. Authoritative citation verification against retrieved chunks
+  const chunkMap = new Map<string, RetrievedChunk>();
+  for (const chunk of retrieval.chunks) {
+    chunkMap.set(chunk.chunkId, chunk);
+  }
+
+  const validCitations: QaCitation[] = [];
+  const seenChunkIds = new Set<string>();
+  let hasFabricatedCitations = false;
+
+  for (const chunkId of parsed.citedChunkIds) {
+    const matchingChunk = chunkMap.get(chunkId);
+    if (matchingChunk) {
+      if (!seenChunkIds.has(chunkId)) {
+        seenChunkIds.add(chunkId);
+        validCitations.push({
+          chunkId: matchingChunk.chunkId,
+          documentId: matchingChunk.documentId,
+          sectionId: matchingChunk.sectionId,
+          pageNumber: matchingChunk.pageNumber,
+          sourceText: matchingChunk.content,
+          similarity: matchingChunk.similarity,
+        });
+      }
+    } else {
+      hasFabricatedCitations = true;
+    }
+  }
+
+  const hadCitationsAttempted = parsed.citedChunkIds.length > 0;
+  const citationValidationPassed = hadCitationsAttempted
+    ? !hasFabricatedCitations && validCitations.length > 0
+    : validCitations.length > 0;
+
+  const isGrounded = validCitations.length > 0;
+
+  // 8. Persist completed assistant message to database
+  const assistantMsg = await appendAssistantMessage({
+    conversationId,
+    documentId,
+    userId,
+    content: parsed.answer,
+    citations: validCitations,
+    hasSufficientEvidence: true,
+    isGrounded,
+    citationValidationPassed,
+  });
+
+  // 9. Emit terminal complete event with authoritative message data
+  yield {
+    type: "complete",
+    messageId: assistantMsg.id,
+    answer: parsed.answer,
+    citations: validCitations,
+    hasSufficientEvidence: true,
+    isGrounded,
+    citationValidationPassed,
+    evidenceUsed: retrieval.chunks,
+    documentId,
+    conversationId,
+  };
+}
+

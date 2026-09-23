@@ -169,5 +169,23 @@ export type {
   AnswerQuestionResult,
   QaCitation,
   ModelQaOutput,
+  ConversationalTurn,
+  QaStreamEvent,
+  QaStreamEventStatus,
+  QaStreamEventDelta,
+  QaStreamEventComplete,
+  QaStreamEventError,
 } from "@/lib/services/qa-service";
+
+export type {
+  Conversation,
+  NewConversation,
+  Message,
+  NewMessage,
+  MessageRole,
+} from "@/lib/db/schema";
+export { MESSAGE_ROLES } from "@/lib/db/schema";
+
+export type { ConversationSummary } from "@/lib/services/conversation-service";
+
 

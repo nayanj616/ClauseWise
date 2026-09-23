@@ -206,29 +206,46 @@ A user-controlled review item derived from findings.
 ---
 
 ### Conversation
-A Q&A session associated with a document.
+A document-scoped Q&A thread associated with a document and user.
+Implemented in PostgreSQL via Drizzle ORM table `conversations` (Phase 5 Slice 5.4, migration `0006_pale_ezekiel_stane.sql`).
 
 | Field | Type | Notes |
 |---|---|---|
-| `id` | UUID | Primary key |
-| `document_id` | UUID | FK → Document |
-| `user_id` | UUID | FK → User |
-| `created_at` | timestamp | |
-| `updated_at` | timestamp | |
+| `id` | UUID | Primary key (`gen_random_uuid()`) |
+| `document_id` | UUID | FK → `documents(id)` on delete cascade |
+| `user_id` | text | FK → `users(id)` on delete cascade |
+| `title` | text | Thread title (default: "New Conversation") |
+| `created_at` | timestamp | Creation timestamp (`now()`) |
+| `updated_at` | timestamp | Last message / activity timestamp (`now()`) |
+
+*Indexes:*
+- `conversations_document_idx` on `(document_id)`
+- `conversations_user_idx` on `(user_id)`
+- `conversations_doc_user_idx` on `(document_id, user_id)`
 
 ---
 
 ### Message
 A single turn in a Conversation.
+Implemented in PostgreSQL via Drizzle ORM table `messages` (Phase 5 Slice 5.4, migration `0006_pale_ezekiel_stane.sql`).
 
 | Field | Type | Notes |
 |---|---|---|
-| `id` | UUID | Primary key |
-| `conversation_id` | UUID | FK → Conversation |
+| `id` | UUID | Primary key (`gen_random_uuid()`) |
+| `conversation_id` | UUID | FK → `conversations(id)` on delete cascade |
 | `role` | enum | `user`, `assistant` |
-| `content` | text | Message text |
-| `citations` | jsonb | Array of `{section_id, page, excerpt}` |
-| `created_at` | timestamp | |
+| `content` | text | Message content / answer |
+| `citations` | jsonb | Array of authoritative `QaCitation` objects; strictly `null` for `user` role |
+| `has_sufficient_evidence` | boolean | Sufficiency flag; strictly `null` for `user` role |
+| `is_grounded` | boolean | Grounding flag; strictly `null` for `user` role |
+| `citation_validation_passed` | boolean | Citation verification flag; strictly `null` for `user` role |
+| `metadata` | jsonb | Optional metadata bag for turn numbers or analytics |
+| `created_at` | timestamp | Message creation timestamp (`now()`) |
+
+*Indexes & Ordering:*
+- `messages_conversation_idx` on `(conversation_id)`
+- `messages_convo_created_idx` on `(conversation_id, created_at)`
+- Deterministic query ordering contract: `ORDER BY created_at ASC, id ASC`
 
 ---
 

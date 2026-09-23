@@ -32,7 +32,14 @@ import { renderToString } from "react-dom/server";
 import { AskPanel } from "@/components/workspace/AskPanel";
 import { DocumentHeader } from "@/components/workspace/DocumentHeader";
 import { DocumentWorkspace } from "@/components/workspace/DocumentWorkspace";
-import { askDocumentQuestionApi } from "@/lib/qa/qa-client";
+import {
+  askDocumentQuestionApi,
+  fetchConversationsApi,
+  createConversationApi,
+  deleteConversationApi,
+  fetchConversationWithMessagesApi,
+  streamConversationMessageApi,
+} from "@/lib/qa/qa-client";
 import type {
   WorkspaceDocument,
   WorkspaceSection,
@@ -546,5 +553,135 @@ describe("4. askDocumentQuestionApi Client Service", () => {
     await expect(
       askDocumentQuestionApi(VALID_DOC_ID, "Valid question?")
     ).rejects.toThrow("Document not found or access denied");
+  });
+});
+
+describe("5. Phase 5.4 Multi-Turn UI & Conversation Client APIs", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  describe("AskPanel Multi-Turn Conversation Controls", () => {
+    it("renders conversation selector controls and new chat button", () => {
+      const html = renderToString(
+        <AskPanel documentId={VALID_DOC_ID} onNavigateToCitation={vi.fn()} />
+      );
+
+      // Verify conversation selector and new chat button are rendered
+      expect(html).toContain("aria-label=\"Select conversation thread\"");
+      expect(html).toContain("New Chat");
+      expect(html).toContain("New Conversation");
+    });
+  });
+
+  describe("Phase 5.4 Client Transport & SSE", () => {
+    it("fetchConversationsApi retrieves document conversations", async () => {
+      const mockList = [
+        {
+          id: "convo-1",
+          documentId: VALID_DOC_ID,
+          title: "First Thread",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          messageCount: 2,
+        },
+      ];
+
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response(JSON.stringify({ conversations: mockList }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        })
+      );
+
+      const convos = await fetchConversationsApi(VALID_DOC_ID);
+      expect(convos).toHaveLength(1);
+      expect(convos[0].title).toBe("First Thread");
+    });
+
+    it("createConversationApi creates new conversation thread", async () => {
+      const mockConvo = {
+        id: "convo-new",
+        documentId: VALID_DOC_ID,
+        title: "Lease Review",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response(JSON.stringify({ conversation: mockConvo }), {
+          status: 201,
+          headers: { "Content-Type": "application/json" },
+        })
+      );
+
+      const created = await createConversationApi(VALID_DOC_ID, "Lease Review");
+      expect(created.id).toBe("convo-new");
+      expect(created.title).toBe("Lease Review");
+    });
+
+    it("deleteConversationApi calls DELETE and succeeds", async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response(JSON.stringify({ success: true }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        })
+      );
+
+      await deleteConversationApi(VALID_DOC_ID, "convo-to-delete");
+      expect(fetchSpy).toHaveBeenCalledWith(
+        `/api/documents/${VALID_DOC_ID}/conversations/convo-to-delete`,
+        expect.objectContaining({ method: "DELETE" })
+      );
+    });
+
+    it("streamConversationMessageApi parses SSE events and invokes callbacks", async () => {
+      const sseData =
+        "event: status\ndata: {\"type\":\"status\",\"phase\":\"retrieving_evidence\"}\n\n" +
+        "event: delta\ndata: {\"type\":\"delta\",\"delta\":\"Here is \"}\n\n" +
+        "event: delta\ndata: {\"type\":\"delta\",\"delta\":\"the answer.\"}\n\n" +
+        "event: complete\ndata: {\"type\":\"complete\",\"messageId\":\"m-1\",\"answer\":\"Here is the answer.\",\"citations\":[],\"hasSufficientEvidence\":true,\"isGrounded\":true,\"citationValidationPassed\":true}\n\n";
+
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode(sseData));
+          controller.close();
+        },
+      });
+
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response(stream, {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" },
+        })
+      );
+
+      const statusCalls: string[] = [];
+      const deltaCalls: string[] = [];
+      let completeResult: unknown = null;
+
+      await streamConversationMessageApi(
+        VALID_DOC_ID,
+        "convo-1",
+        "What is this?",
+        {
+          onStatus: (phase) => statusCalls.push(phase.phase),
+          onDelta: (delta) => deltaCalls.push(delta),
+          onComplete: (data) => {
+            completeResult = data;
+          },
+          onError: () => {},
+        }
+      );
+
+      expect(statusCalls).toEqual(["retrieving_evidence"]);
+      expect(deltaCalls).toEqual(["Here is ", "the answer."]);
+      expect(completeResult).toEqual(
+        expect.objectContaining({
+          messageId: "m-1",
+          answer: "Here is the answer.",
+        })
+      );
+    });
   });
 });
