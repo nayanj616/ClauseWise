@@ -12,6 +12,8 @@ interface TestWorkspacePageProps {
   searchParams: Promise<{
     state?: string;
     tab?: "analysis" | "document" | "ask";
+    findingId?: string;
+    sectionId?: string;
   }>;
 }
 
@@ -189,7 +191,7 @@ export default async function TestWorkspacePage({
     notFound();
   }
 
-  const { state, tab } = await searchParams;
+  const { state, tab, findingId, sectionId } = await searchParams;
 
   if (state === "not-found") {
     return (
@@ -256,6 +258,8 @@ export default async function TestWorkspacePage({
         data={workspaceData}
         findings={mockFindings}
         initialTab={tab === "document" ? "document" : tab === "ask" ? "ask" : "analysis"}
+        initialFindingId={findingId}
+        initialSectionId={sectionId}
       />
     </div>
   );

@@ -168,7 +168,9 @@ test.describe("Phase 6 — Contextual Assistant Flow", () => {
 
     // Verify request payload contained sectionId: "sec-2"
     await expect.poll(() => capturedRequestBody?.sectionId).toBe("sec-2");
-    expect(capturedRequestBody?.question).toBe("What is the invoice payment deadline?");
+    expect((capturedRequestBody as { question?: string } | null)?.question).toBe(
+      "What is the invoice payment deadline?"
+    );
 
     // 8. Verify user message has context badge
     const userMsgBadge = page.getByTestId("user-message-context-badge");

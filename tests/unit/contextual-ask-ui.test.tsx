@@ -32,6 +32,7 @@ const mockSections: WorkspaceSection[] = [
   {
     id: "sec-1",
     orderIndex: 0,
+    sectionNumber: 1,
     title: "1. Term and Scope",
     content: "This Agreement shall commence on September 30, 2026.",
     pageStart: 1,
@@ -40,6 +41,7 @@ const mockSections: WorkspaceSection[] = [
   {
     id: "sec-2",
     orderIndex: 1,
+    sectionNumber: 2,
     title: "8. Termination and Remedies",
     content: "Either party may terminate with 60 days written notice.",
     pageStart: 4,
@@ -48,6 +50,7 @@ const mockSections: WorkspaceSection[] = [
   {
     id: "sec-3",
     orderIndex: 2,
+    sectionNumber: 3,
     title: "11. Confidentiality",
     content: "Confidential Information shall be protected for 5 years.",
     pageStart: 8,
@@ -212,9 +215,11 @@ describe("Phase 6 — Contextual Ask UI (AskPanel)", () => {
           citations: [
             {
               chunkId: "chunk-8",
+              documentId: VALID_DOC_ID,
               sectionId: "sec-2",
               sourceText: "Either party may seek injunctive relief.",
               pageNumber: 4,
+              similarity: 0.9,
             },
           ],
           hasSufficientEvidence: true,
@@ -263,9 +268,11 @@ describe("Phase 6 — Contextual Ask UI (AskPanel)", () => {
           citations: [
             {
               chunkId: "chunk-8",
+              documentId: VALID_DOC_ID,
               sectionId: "sec-2",
               sourceText: "Either party may terminate with 60 days written notice.",
               pageNumber: 4,
+              similarity: 0.9,
             },
           ],
           hasSufficientEvidence: true,
@@ -299,9 +306,11 @@ describe("Phase 6 — Contextual Ask UI (AskPanel)", () => {
         citations: [
           {
             chunkId: "chunk-8",
+            documentId: VALID_DOC_ID,
             sectionId: "sec-2",
             sourceText: "Either party may seek injunctive relief.",
             pageNumber: 4,
+            similarity: 0.9,
           },
         ],
         evidenceUsed: [],

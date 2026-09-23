@@ -9,6 +9,7 @@ import {
   AlertCircle,
   HelpCircle,
   BookOpen,
+  CheckSquare,
 } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -25,6 +26,7 @@ export interface EvidencePanelProps {
   sectionTitle?: string;
   onJumpToSection?: (sectionId: string | null) => void;
   onViewInDocument?: (finding: DocumentFinding) => void;
+  onAddAction?: (finding: DocumentFinding) => void;
   className?: string;
 }
 
@@ -33,6 +35,7 @@ export function EvidencePanel({
   sectionTitle,
   onJumpToSection,
   onViewInDocument,
+  onAddAction,
   className,
 }: EvidencePanelProps) {
   // Empty State: No finding selected
@@ -185,12 +188,26 @@ export function EvidencePanel({
           )}
         </div>
 
-        {/* Contextual Action Button (View in Document Text) */}
-        {!isMissing && finding.sourceText && finding.sectionId && (onViewInDocument || onJumpToSection) && (
-          <div className="border-t pt-4 mt-4 flex items-center justify-between">
-            <span className="text-xs text-muted-foreground">
-              Examine full section in context
-            </span>
+        {/* Footer Actions: Add Action & View in Document Text */}
+        <div className="border-t pt-4 mt-4 flex items-center justify-between gap-2 flex-wrap">
+          <div>
+            {onAddAction && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => onAddAction(finding)}
+                className="gap-1.5 text-xs text-foreground"
+                aria-label={`Add action for finding "${finding.label}"`}
+                data-testid="evidence-panel-add-action"
+              >
+                <CheckSquare size={13} aria-hidden="true" />
+                <span>Add Action</span>
+              </Button>
+            )}
+          </div>
+
+          {!isMissing && finding.sourceText && finding.sectionId && (onViewInDocument || onJumpToSection) && (
             <Button
               type="button"
               variant="outline"
@@ -209,8 +226,8 @@ export function EvidencePanel({
               <span>View in Document Text</span>
               <ArrowRight size={14} aria-hidden="true" />
             </Button>
-          </div>
-        )}
+          )}
+        </div>
       </CardContent>
     </Card>
   );

@@ -147,7 +147,9 @@ export interface SectionContextPromptInfo {
 /**
  * Formats active section context and provenance notes for the prompt.
  */
-export function formatSectionContext(info?: SectionContextPromptInfo): string {
+export function formatSectionContext(
+  info?: SectionContextPromptInfo | null
+): string {
   if (!info?.sectionId) return "";
   const titlePart = info.sectionTitle ? ` (${info.sectionTitle})` : "";
   if (info.fallbackUsed) {

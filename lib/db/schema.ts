@@ -345,6 +345,45 @@ export const messages = pgTable(
 );
 
 // ---------------------------------------------------------------------------
+// Action — Phase 7
+// Represents a trackable legal review item derived from document findings.
+// Lifecycle: open <-> completed.
+// ---------------------------------------------------------------------------
+
+export const ACTION_STATUSES = ["open", "completed"] as const;
+export type ActionStatus = (typeof ACTION_STATUSES)[number];
+
+export const actions = pgTable(
+  "actions",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    documentId: uuid("document_id")
+      .notNull()
+      .references(() => documents.id, { onDelete: "cascade" }),
+    findingId: uuid("finding_id").references(() => documentFindings.id, {
+      onDelete: "cascade",
+    }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    description: text("description"),
+    status: text("status", { enum: ACTION_STATUSES }).notNull().default("open"),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
+    completedAt: timestamp("completed_at", { mode: "date" }),
+  },
+  (t) => ({
+    userIdIdx: index("idx_actions_user_id").on(t.userId),
+    documentIdIdx: index("idx_actions_document_id").on(t.documentId),
+    findingIdIdx: index("idx_actions_finding_id").on(t.findingId),
+    statusIdx: index("idx_actions_status").on(t.status),
+  })
+);
+
+// ---------------------------------------------------------------------------
 // Relations (Drizzle relational query API)
 // ---------------------------------------------------------------------------
 
@@ -353,6 +392,7 @@ export const usersRelations = relations(users, ({ many }) => ({
   sessions: many(sessions),
   documents: many(documents),
   conversations: many(conversations),
+  actions: many(actions),
 }));
 
 export const accountsRelations = relations(accounts, ({ one }) => ({
@@ -369,6 +409,7 @@ export const documentsRelations = relations(documents, ({ one, many }) => ({
   chunks: many(documentChunks),
   findings: many(documentFindings),
   conversations: many(conversations),
+  actions: many(actions),
 }));
 
 export const documentSectionsRelations = relations(documentSections, ({ one, many }) => ({
@@ -392,7 +433,7 @@ export const documentChunksRelations = relations(documentChunks, ({ one, many })
   findings: many(documentFindings),
 }));
 
-export const documentFindingsRelations = relations(documentFindings, ({ one }) => ({
+export const documentFindingsRelations = relations(documentFindings, ({ one, many }) => ({
   document: one(documents, {
     fields: [documentFindings.documentId],
     references: [documents.id],
@@ -405,6 +446,7 @@ export const documentFindingsRelations = relations(documentFindings, ({ one }) =
     fields: [documentFindings.chunkId],
     references: [documentChunks.id],
   }),
+  actions: many(actions),
 }));
 
 export const conversationsRelations = relations(conversations, ({ one, many }) => ({
@@ -426,6 +468,21 @@ export const messagesRelations = relations(messages, ({ one }) => ({
   }),
 }));
 
+export const actionsRelations = relations(actions, ({ one }) => ({
+  document: one(documents, {
+    fields: [actions.documentId],
+    references: [documents.id],
+  }),
+  finding: one(documentFindings, {
+    fields: [actions.findingId],
+    references: [documentFindings.id],
+  }),
+  user: one(users, {
+    fields: [actions.userId],
+    references: [users.id],
+  }),
+}));
+
 // ---------------------------------------------------------------------------
 // Inferred types — used throughout the codebase instead of raw DB rows
 // ---------------------------------------------------------------------------
@@ -444,5 +501,7 @@ export type Conversation = typeof conversations.$inferSelect;
 export type NewConversation = typeof conversations.$inferInsert;
 export type Message = typeof messages.$inferSelect;
 export type NewMessage = typeof messages.$inferInsert;
+export type Action = typeof actions.$inferSelect;
+export type NewAction = typeof actions.$inferInsert;
 
 

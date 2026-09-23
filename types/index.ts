@@ -188,4 +188,20 @@ export { MESSAGE_ROLES } from "@/lib/db/schema";
 
 export type { ConversationSummary } from "@/lib/services/conversation-service";
 
+// ---------------------------------------------------------------------------
+// Action Center (Phase 7)
+// ---------------------------------------------------------------------------
 
+export type {
+  Action,
+  NewAction,
+  ActionStatus,
+} from "@/lib/db/schema";
+export { ACTION_STATUSES } from "@/lib/db/schema";
+
+export type {
+  ActionWithDetails,
+  CreateActionInput,
+  UpdateActionStatusInput,
+  ListActionsInput,
+} from "@/lib/services/action-service";

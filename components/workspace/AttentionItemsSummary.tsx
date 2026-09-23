@@ -12,6 +12,7 @@ export interface AttentionItemsSummaryProps {
   selectedFindingId?: string | null;
   onSelectFinding?: (finding: DocumentFinding) => void;
   onViewInDocument?: (finding: DocumentFinding) => void;
+  onAddAction?: (finding: DocumentFinding) => void;
   sectionsById?: Map<string, WorkspaceSection>;
   className?: string;
 }
@@ -27,6 +28,7 @@ export function AttentionItemsSummary({
   selectedFindingId,
   onSelectFinding,
   onViewInDocument,
+  onAddAction,
   sectionsById,
   className,
 }: AttentionItemsSummaryProps) {
@@ -77,6 +79,7 @@ export function AttentionItemsSummary({
                 isSelected={finding.id === selectedFindingId}
                 onSelect={() => onSelectFinding?.(finding)}
                 onViewInDocument={onViewInDocument}
+                onAddAction={onAddAction}
                 sectionTitle={sectionTitle}
               />
             );

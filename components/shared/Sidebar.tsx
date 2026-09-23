@@ -6,7 +6,7 @@ import {
   LayoutDashboard,
   FileText,
   GitCompare,
-  Zap,
+  CheckSquare,
   LogOut,
 } from "lucide-react";
 import { Logo } from "@/components/shared/Logo";
@@ -26,7 +26,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/documents", label: "Documents", icon: FileText },
   { href: "/compare", label: "Compare", icon: GitCompare },
-  { href: "/actions", label: "Action Plans", icon: Zap },
+  { href: "/actions", label: "Action Center", icon: CheckSquare },
 ];
 
 interface SidebarProps {

@@ -54,6 +54,7 @@ const chunkA: RetrievedChunk = {
   pageNumber: 4,
   similarity: 0.88,
   chunkIndex: 0,
+  tokenCount: 50,
 };
 
 const chunkB: RetrievedChunk = {
@@ -64,6 +65,7 @@ const chunkB: RetrievedChunk = {
   pageNumber: 8,
   similarity: 0.91,
   chunkIndex: 4,
+  tokenCount: 50,
 };
 
 // ---------------------------------------------------------------------------

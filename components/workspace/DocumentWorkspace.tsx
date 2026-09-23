@@ -20,6 +20,7 @@ import { AttentionItemsSummary } from "./AttentionItemsSummary";
 import { FormattedDatesList } from "./FormattedDatesList";
 import { FormattedFinancialList } from "./FormattedFinancialList";
 import { AskPanel } from "./AskPanel";
+import { CreateActionDialog } from "@/components/actions/CreateActionDialog";
 import {
   DocumentProcessingState,
   DocumentErrorState,
@@ -32,6 +33,8 @@ export interface DocumentWorkspaceProps {
   findings?: DocumentFinding[];
   className?: string;
   initialTab?: "analysis" | "document" | "ask";
+  initialFindingId?: string | null;
+  initialSectionId?: string | null;
   onAsk?: (documentId: string, question: string) => Promise<AnswerQuestionResult>;
   initialAskResult?: AnswerQuestionResult | null;
 }
@@ -55,6 +58,8 @@ export function DocumentWorkspace({
   findings = [],
   className,
   initialTab = "analysis",
+  initialFindingId,
+  initialSectionId,
   onAsk,
   initialAskResult,
 }: DocumentWorkspaceProps) {
@@ -65,7 +70,7 @@ export function DocumentWorkspace({
 
   // Selected finding state
   const [selectedFindingId, setSelectedFindingId] = React.useState<string | null>(
-    findings.length > 0 ? findings[0].id : null
+    initialFindingId || (findings.length > 0 ? findings[0].id : null)
   );
 
   // Selected section index state for document viewer
@@ -77,6 +82,10 @@ export function DocumentWorkspace({
   // Selected section context for Ask assistant (Phase 6 Contextual Assistant)
   const [activeContextSectionId, setActiveContextSectionId] = React.useState<string | null>(null);
 
+  // Action creation state (Phase 7 Action Center)
+  const [actionFindingToCreate, setActionFindingToCreate] =
+    React.useState<DocumentFinding | null>(null);
+
   // Map sections by id for fast lookups
   const sectionsById = React.useMemo(() => {
     const map = new Map<string, WorkspaceSection>();
@@ -85,6 +94,35 @@ export function DocumentWorkspace({
     }
     return map;
   }, [sections]);
+
+  // Inbound navigation handler: restore finding & section when navigating from Action Center
+  React.useEffect(() => {
+    if (initialFindingId) {
+      const found = findings.find((f) => f.id === initialFindingId);
+      if (found) {
+        setSelectedFindingId(found.id);
+        if (found.sectionId) {
+          const sec = sectionsById.get(found.sectionId);
+          if (sec) {
+            setSelectedSectionIndex(sec.orderIndex);
+          }
+        }
+        if (found.sourceText) {
+          setActiveEvidenceExcerpt(found.sourceText);
+        }
+      }
+    } else if (initialSectionId) {
+      const sec = sectionsById.get(initialSectionId);
+      if (sec) {
+        setSelectedSectionIndex(sec.orderIndex);
+      }
+    }
+  }, [initialFindingId, initialSectionId, findings, sectionsById]);
+
+  // Handler for adding action from finding
+  const handleAddAction = React.useCallback((finding: DocumentFinding) => {
+    setActionFindingToCreate(finding);
+  }, []);
 
   // Handler for "Ask about this section" from DocumentViewer
   const handleAskAboutSection = React.useCallback((sectionId: string) => {
@@ -255,6 +293,7 @@ export function DocumentWorkspace({
             selectedFindingId={selectedFinding?.id || null}
             onSelectFinding={(f) => setSelectedFindingId(f.id)}
             onViewInDocument={handleNavigateToEvidence}
+            onAddAction={handleAddAction}
             sectionsById={sectionsById}
           />
 
@@ -315,6 +354,7 @@ export function DocumentWorkspace({
                   selectedFindingId={selectedFinding?.id || null}
                   onSelectFinding={(f) => setSelectedFindingId(f.id)}
                   onViewInDocument={handleNavigateToEvidence}
+                  onAddAction={handleAddAction}
                   sectionsById={sectionsById}
                 />
               </div>
@@ -326,6 +366,7 @@ export function DocumentWorkspace({
                   sectionTitle={selectedFindingSectionTitle}
                   onJumpToSection={handleJumpToSection}
                   onViewInDocument={handleNavigateToEvidence}
+                  onAddAction={handleAddAction}
                 />
               </div>
             </div>
@@ -380,6 +421,21 @@ export function DocumentWorkspace({
           .
         </p>
       </footer>
+
+      {/* Create Action Modal (Phase 7 Action Center) */}
+      {actionFindingToCreate && (
+        <CreateActionDialog
+          finding={actionFindingToCreate}
+          documentId={document.id}
+          isOpen={!!actionFindingToCreate}
+          onClose={() => setActionFindingToCreate(null)}
+          sectionTitle={
+            actionFindingToCreate.sectionId
+              ? sectionsById.get(actionFindingToCreate.sectionId)?.title
+              : undefined
+          }
+        />
+      )}
     </div>
   );
 }

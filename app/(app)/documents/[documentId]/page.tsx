@@ -7,6 +7,11 @@ import { DocumentNotFoundState } from "@/components/workspace/WorkspaceStates";
 
 interface DocumentWorkspacePageProps {
   params: Promise<{ documentId: string }>;
+  searchParams?: Promise<{
+    findingId?: string;
+    sectionId?: string;
+    tab?: "analysis" | "document" | "ask";
+  }>;
 }
 
 export async function generateMetadata({
@@ -26,9 +31,11 @@ export async function generateMetadata({
  */
 export default async function DocumentWorkspacePage({
   params,
+  searchParams,
 }: DocumentWorkspacePageProps) {
   const session = await requireSession();
   const { documentId } = await params;
+  const sp = searchParams ? await searchParams : undefined;
 
   // Retrieve workspace data strictly scoped to authenticated user
   const data = await getDocumentWorkspaceData(documentId, session.user.id);
@@ -46,7 +53,13 @@ export default async function DocumentWorkspacePage({
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto w-full">
-      <DocumentWorkspace data={data} findings={findings} />
+      <DocumentWorkspace
+        data={data}
+        findings={findings}
+        initialFindingId={sp?.findingId}
+        initialSectionId={sp?.sectionId}
+        initialTab={sp?.tab}
+      />
     </div>
   );
 }

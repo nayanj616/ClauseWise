@@ -11,6 +11,7 @@ import {
   ArrowRight,
   Calendar,
   DollarSign,
+  CheckSquare,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -26,6 +27,7 @@ export interface FindingCardProps {
   isSelected: boolean;
   onSelect: () => void;
   onViewInDocument?: (finding: DocumentFinding) => void;
+  onAddAction?: (finding: DocumentFinding) => void;
   sectionTitle?: string;
   className?: string;
 }
@@ -67,6 +69,7 @@ export function FindingCard({
   isSelected,
   onSelect,
   onViewInDocument,
+  onAddAction,
   sectionTitle,
   className,
 }: FindingCardProps) {
@@ -193,24 +196,45 @@ export function FindingCard({
           </div>
         )}
 
-        {/* View in Document action for substantive findings with evidence */}
-        {!isMissing && finding.sourceText && finding.sectionId && onViewInDocument && (
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={(e) => {
-              e.stopPropagation();
-              onViewInDocument(finding);
-            }}
-            className="h-6 text-[11px] text-primary hover:text-primary hover:bg-primary/10 px-2 py-0 gap-1 font-medium shrink-0"
-            aria-label={`View finding "${finding.label}" in document`}
-            data-testid={`finding-view-in-doc-${finding.id}`}
-          >
-            <span>View in document</span>
-            <ArrowRight size={11} aria-hidden="true" />
-          </Button>
-        )}
+        <div className="flex items-center gap-1 shrink-0">
+          {/* Add Action button */}
+          {onAddAction && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={(e) => {
+                e.stopPropagation();
+                onAddAction(finding);
+              }}
+              className="h-6 text-[11px] text-muted-foreground hover:text-foreground hover:bg-muted px-2 py-0 gap-1 font-medium shrink-0"
+              aria-label={`Add action for finding "${finding.label}"`}
+              data-testid={`finding-add-action-${finding.id}`}
+            >
+              <CheckSquare size={11} aria-hidden="true" />
+              <span>Add action</span>
+            </Button>
+          )}
+
+          {/* View in Document action for substantive findings with evidence */}
+          {!isMissing && finding.sourceText && finding.sectionId && onViewInDocument && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={(e) => {
+                e.stopPropagation();
+                onViewInDocument(finding);
+              }}
+              className="h-6 text-[11px] text-primary hover:text-primary hover:bg-primary/10 px-2 py-0 gap-1 font-medium shrink-0"
+              aria-label={`View finding "${finding.label}" in document`}
+              data-testid={`finding-view-in-doc-${finding.id}`}
+            >
+              <span>View in document</span>
+              <ArrowRight size={11} aria-hidden="true" />
+            </Button>
+          )}
+        </div>
       </div>
     </div>
   );
