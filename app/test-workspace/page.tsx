@@ -25,6 +25,13 @@ const mockDocument: WorkspaceDocument = {
   mimeType: "application/pdf",
   status: "ready",
   errorMessage: null,
+  documentType: "Master Services Agreement",
+  parties: [
+    { name: "Alpha Corp", role: "Customer" },
+    { name: "Omega LLC", role: "Provider" },
+  ],
+  governingLaw: "State of Delaware",
+  jurisdiction: "Wilmington, Delaware",
   createdAt: new Date("2026-09-20T10:00:00Z"),
   updatedAt: new Date("2026-09-20T10:00:00Z"),
   metadata: {

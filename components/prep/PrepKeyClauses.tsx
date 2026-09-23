@@ -92,6 +92,7 @@ export function PrepKeyClauses({
                   onClick={() => onSelectSection(clause.orderIndex)}
                   className="gap-1.5 self-start text-xs h-7 px-2 text-primary hover:text-primary hover:bg-primary/10 print:hidden"
                   aria-label={`Jump to ${clause.title} in document text`}
+                  data-testid={`prep-clause-view-src-${clause.sectionId}`}
                 >
                   <span>View in Document Text</span>
                   <ArrowRight size={13} aria-hidden="true" />

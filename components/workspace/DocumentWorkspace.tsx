@@ -227,11 +227,17 @@ export function DocumentWorkspace({
       document: {
         id: document.id,
         filename: document.filename,
-        documentType: document.documentType ?? null,
+        documentType: document.documentType ?? (metadata.documentType as string) ?? null,
         isStatedType,
-        parties: document.parties ?? null,
-        governingLaw: document.governingLaw ?? null,
-        jurisdiction: document.jurisdiction ?? null,
+        parties:
+          document.parties ??
+          (Array.isArray(metadata.parties)
+            ? (metadata.parties as Array<unknown>).map((p) =>
+                typeof p === "string" ? { name: p, role: null } : (p as { name: string; role: string | null })
+              )
+            : null),
+        governingLaw: document.governingLaw ?? (metadata.governingLaw as string) ?? null,
+        jurisdiction: document.jurisdiction ?? (metadata.jurisdiction as string) ?? null,
         pageCount: document.pageCount ?? null,
         fileSizeBytes: document.fileSizeBytes,
         createdAt: document.createdAt ? new Date(document.createdAt) : new Date(),

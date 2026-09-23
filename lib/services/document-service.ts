@@ -10,7 +10,7 @@
  * SERVER-SIDE ONLY — do not import in client components.
  */
 
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   documents,
@@ -300,6 +300,52 @@ export async function getDocumentWorkspaceData(
     throw new DatabaseError("Failed to retrieve document workspace data", {
       cause: error,
     });
+  }
+}
+
+/**
+ * Lists documents owned by the authenticated user for selection in Compare and other views.
+ * Strictly filters by userId (anti-oracle tenant isolation).
+ *
+ * @param userId - Authenticated user UUID
+ * @returns Array of user documents sorted by createdAt DESC
+ */
+export async function listUserDocuments(
+  userId: string
+): Promise<Array<{
+  id: string;
+  title: string;
+  originalFilename: string | null;
+  status: DocumentStatus;
+  documentType: string | null;
+  pageCount: number | null;
+  createdAt: Date;
+}>> {
+  if (!userId || typeof userId !== "string" || !userId.trim()) {
+    return [];
+  }
+
+  const cleanUserId = userId.trim();
+
+  try {
+    const rows = await db
+      .select({
+        id: documents.id,
+        title: documents.title,
+        originalFilename: documents.originalFilename,
+        status: documents.status,
+        documentType: documents.documentType,
+        pageCount: documents.pageCount,
+        createdAt: documents.createdAt,
+      })
+      .from(documents)
+      .where(eq(documents.userId, cleanUserId))
+      .orderBy(desc(documents.createdAt));
+
+    return rows;
+  } catch (error) {
+    console.error(`[listUserDocuments] Database error for user ${cleanUserId}:`, error);
+    throw new DatabaseError("Failed to list user documents", { cause: error });
   }
 }
 

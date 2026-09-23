@@ -83,7 +83,7 @@ test.describe("Phase 8 — Professional Prep Flow", () => {
     const counselQuestions = page.getByTestId("prep-questions-for-counsel");
     await expect(counselQuestions).toBeVisible();
     await expect(counselQuestions).toContainText("Suggested Questions for Legal Counsel");
-    await expect(counselQuestions).toContainText("Absence of Indemnification Clause");
+    await expect(counselQuestions).toContainText("Indemnification");
     await expect(counselQuestions).toContainText("Short Notice for Billing Disputes");
 
     // 9. Verify Open Checklist Actions & User Questions

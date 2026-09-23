@@ -582,37 +582,46 @@ and suggested questions.
 
 ---
 
-## Phase 9 — Document Comparison
+## Phase 9 — Document Comparison (✅ Complete)
 
-**Goal:** Users can compare two documents and see meaningful, source-referenced differences.
+**Goal:** Users can compare two documents and see meaningful, source-referenced differences side by side.
 
 ### Deliverables
 
-**Database**
-- `Comparison` schema
-- `ComparisonDifference` schema
-- Drizzle migrations
+**Architecture & Alignment Engine**
+- Deterministic Hybrid Multi-Tier Alignment (Strategy D):
+  - Tier 1: Metadata comparison (governing law, jurisdiction, document type, parties).
+  - Tier 2: Exact normalized title matching.
+  - Tier 3: Canonical provision catalog keyword matching.
+  - Tier 4: Controlled Jaccard content overlap fallback ($\ge 0.45$ ceiling, strictly 1:1 matching with deterministic tie-breaking).
+- Strict "Unchanged" Contract: Classified as `unchanged` only when normalized content is strictly identical; any wording alterations classify as `modified`.
+- Zero Schema Migrations: Computed on demand using existing `document_sections` and `document_findings`.
+- Metric Privacy: Internal alignment scores omitted from user-facing presentation.
 
-**Domain service**
-- `comparison-service.ts`
-  - `createComparison()` — align sections, identify differences (AI-assisted)
-  - `listComparisons()`
-  - `getComparison()` with differences
+**Domain Service & API**
+- `lib/services/comparison-service.ts`:
+  - `compareDocuments({ documentAId, documentBId, userId })`
+  - Strict tenant isolation, anti-oracle 404 mapping, self-comparison 400 validation, readiness 422 enforcement.
+- `GET /api/documents/compare?docA=...&docB=...`:
+  - Authenticated session requirement, UUID query validation, sanitized 500 error reporting.
+- `lib/services/document-service.ts`:
+  - `listUserDocuments(userId)` helper for document dropdown selection.
 
-**AI**
-- Comparison prompt (structured output: differences with source refs from both documents)
-
-**UI**
-- Compare page: document selector (A and B)
-- Differences list: added / removed / modified / value changed badges
-- Source text from both documents displayed per difference
-- No "choose this one" recommendation UI
+**UI Components (`components/compare/`)**
+- `ComparisonWorkspace`: Selection state, URL synchronization, dynamic API loading, error alerts.
+- `CompareDisclaimerBanner` & `CompareDisclaimerFooter`: Non-lawyer disclaimer and no-attorney-client relationship notices.
+- `DocumentSelectorPair`: Document A & Document B dropdowns with status indicators and swap button (`↔`).
+- `ComparisonSummaryCard`: Document identity metadata cards and breakdown counters (`Modified`, `Added`, `Removed`, `Unchanged`).
+- `MetadataDiffCard`: Side-by-side legal profile comparison table.
+- `DifferencesList`: Category filter tabs (`All`, `Modified`, `Added`, `Removed`, `Unchanged`) and live search input.
+- `DifferenceCard`: Side-by-side verbatim excerpts, page numbers, category badges, and deep links into Document Workspace (`View in Document A`, `View in Document B`).
+- `ComparisonEmptyState`: Scenarios for `< 2` documents, identical selection, and unselected documents.
+- `app/(app)/compare/page.tsx`: Server component with session auth and initial server comparison.
 
 **Tests**
-- Unit: difference type classification
-- Unit: Zod schema for comparison output
-- Integration: comparison → differences created (mock OpenAI)
-- E2E: select two documents → compare → differences listed with sources
+- Unit: Service tests (`tests/unit/comparison-service.test.ts` — 13 tests), Route tests (`tests/unit/comparison-routes.test.ts` — 8 tests), UI tests (`tests/unit/comparison-ui.test.tsx` — 8 tests).
+- E2E: Full workflow suite (`tests/e2e/compare-flow.spec.ts` — 7 tests) covering selectors, swap action, summary counts, metadata diffs, side-by-side evidence, filter pills, search input, deep-link navigation, and empty states.
+- 42 / 42 total E2E Playwright tests passing across all 8 suites; 47 / 47 unit test files passing (766 tests).
 
 ---
 

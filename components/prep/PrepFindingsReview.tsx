@@ -130,6 +130,7 @@ export function PrepFindingsReview({
             onClick={() => onViewInDocument(finding)}
             className="gap-1.5 self-start text-xs h-7 px-2 text-primary hover:text-primary hover:bg-primary/10 print:hidden"
             aria-label={`View evidence for ${finding.label} in document text`}
+            data-testid={`prep-finding-view-src-${finding.id}`}
           >
             <span>View Source Excerpt</span>
             <ArrowRight size={13} aria-hidden="true" />
