@@ -46,10 +46,10 @@ export function ComparisonWorkspace({
 
   // Sync state if props change (e.g. from server navigation)
   React.useEffect(() => {
-    if (initialComparison) {
-      setComparison(initialComparison);
-    }
-  }, [initialComparison]);
+    setComparison(initialComparison);
+    setSelectedDocAId(initialDocAId || null);
+    setSelectedDocBId(initialDocBId || null);
+  }, [initialComparison, initialDocAId, initialDocBId]);
 
   const readyDocuments = React.useMemo(
     () => userDocuments.filter((d) => d.status === "ready"),

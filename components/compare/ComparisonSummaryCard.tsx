@@ -27,7 +27,7 @@ export function ComparisonSummaryCard({
             <span>Comparison Summary</span>
           </CardTitle>
           <div className="flex items-center gap-1.5 flex-wrap">
-            <Badge variant="outline" className="text-xs font-semibold px-2.5 py-0.5">
+            <Badge variant="outline" className="text-xs font-semibold px-2.5 py-0.5" data-testid="stat-total-diffs">
               {summary.totalDifferences} difference{summary.totalDifferences === 1 ? "" : "s"} identified
             </Badge>
           </div>
@@ -88,7 +88,7 @@ export function ComparisonSummaryCard({
               <span className="text-[11px] font-medium">Modified</span>
             </div>
             <p className="text-base font-bold text-foreground" data-testid="count-modified">
-              {summary.modifiedCount}
+              <span data-testid="stat-modified">{summary.modifiedCount}</span>
             </p>
           </div>
 
@@ -98,7 +98,7 @@ export function ComparisonSummaryCard({
               <span className="text-[11px] font-medium">Added in B</span>
             </div>
             <p className="text-base font-bold text-foreground" data-testid="count-added">
-              {summary.addedCount}
+              <span data-testid="stat-added">{summary.addedCount}</span>
             </p>
           </div>
 
@@ -108,7 +108,7 @@ export function ComparisonSummaryCard({
               <span className="text-[11px] font-medium">Removed in B</span>
             </div>
             <p className="text-base font-bold text-foreground" data-testid="count-removed">
-              {summary.removedCount}
+              <span data-testid="stat-removed">{summary.removedCount}</span>
             </p>
           </div>
 
@@ -118,7 +118,7 @@ export function ComparisonSummaryCard({
               <span className="text-[11px] font-medium">Unchanged</span>
             </div>
             <p className="text-base font-bold text-foreground" data-testid="count-unchanged">
-              {summary.unchangedCount}
+              <span data-testid="stat-unchanged">{summary.unchangedCount}</span>
             </p>
           </div>
         </div>

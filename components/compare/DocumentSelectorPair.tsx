@@ -45,7 +45,7 @@ export function DocumentSelectorPair({
               </span>
               <span>Document A (Base Document)</span>
             </label>
-            <div className="relative">
+            <div className="relative" data-testid="select-doc-a">
               <select
                 id="doc-a-selector"
                 data-testid="doc-a-select"
@@ -104,7 +104,7 @@ export function DocumentSelectorPair({
               </span>
               <span>Document B (Comparison Document)</span>
             </label>
-            <div className="relative">
+            <div className="relative" data-testid="select-doc-b">
               <select
                 id="doc-b-selector"
                 data-testid="doc-b-select"

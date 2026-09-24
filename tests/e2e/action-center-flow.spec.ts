@@ -201,15 +201,6 @@ test.describe("Phase 7 — Action Center Flow", () => {
     // -----------------------------------------------------------------------
     const viewSourceLink = page.getByTestId("action-view-source-action-e2e-1");
     await expect(viewSourceLink).toBeVisible();
-
-    // Rewire view-source link href to test-workspace so it navigates in mock harness
-    await page.evaluate(() => {
-      const link = document.querySelector('[data-testid="action-view-source-action-e2e-1"]') as HTMLAnchorElement;
-      if (link) {
-        link.href = "/test-workspace?sectionId=sec-1&findingId=finding-ob-1&tab=document";
-      }
-    });
-
     await viewSourceLink.click();
 
     // Verify browser navigated to document workspace

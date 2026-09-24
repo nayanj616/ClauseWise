@@ -49,6 +49,7 @@ export function SignInForm({ callbackUrl, registered }: SignInFormProps) {
       {/* Server action error */}
       {state?.error && (
         <div
+          id="signin-error"
           role="alert"
           className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive"
         >
@@ -65,6 +66,8 @@ export function SignInForm({ callbackUrl, registered }: SignInFormProps) {
           autoComplete="email"
           placeholder="you@example.com"
           required
+          aria-invalid={Boolean(state?.error)}
+          aria-describedby={state?.error ? "signin-error" : undefined}
         />
       </div>
 
@@ -77,6 +80,8 @@ export function SignInForm({ callbackUrl, registered }: SignInFormProps) {
           autoComplete="current-password"
           placeholder="••••••••"
           required
+          aria-invalid={Boolean(state?.error)}
+          aria-describedby={state?.error ? "signin-error" : undefined}
         />
       </div>
 

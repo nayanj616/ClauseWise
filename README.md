@@ -66,6 +66,54 @@ Every AI response is grounded in document evidence, translated to plain English,
 - ✅ Strict absence of numerical legal-risk scores across schemas, domain types, and UI
 - ✅ Comprehensive Phase 3 verification suite with 413 tests passing across 24 test files
 
+### Phase 4 — Analysis / Findings & Grounded Evidence
+- ✅ Master-detail finding inspector with verbatim excerpts and verified section/page coordinates
+- ✅ Exact sentence and excerpt highlighting in `DocumentViewer` with automatic scrolling
+- ✅ Strict absence discipline for `missing_information` findings (never fabricating fake citations or quotes)
+- ✅ Formatted Important Dates & Financial Terms grids with deep links into source text
+- ✅ Attention Items summary card prioritizing critical review clauses
+
+### Phase 5 — Evidence-Backed Q&A
+- ✅ Multi-turn conversational Q&A threads with persistent messages and conversation switcher
+- ✅ Low-latency Server-Sent Events (SSE) streaming with provisional deltas and terminal authoritative verification
+- ✅ Strict Grounded Treatment Gate: citations and grounding flags displayed only upon completion
+- ✅ Deterministic retrieval engine combining section focus, pgvector embeddings, and keyword matching
+- ✅ Automatic refusal banner when document evidence is insufficient (zero hallucination)
+
+### Phase 6 — Contextual Assistant
+- ✅ Section-scoped Q&A navigation ("Ask about this section") from Document Viewer and Findings
+- ✅ Active section context indicator with easy clear-context action
+- ✅ Transparent fallback provenance notice when evidence is retrieved outside the targeted clause
+
+### Phase 7 — Action Center
+- ✅ Convert any finding into a trackable legal review item with verified evidence references
+- ✅ Dedicated Action Center workspace (`/actions`) with status tabs (`All`, `Open`, `Completed`)
+- ✅ Optimistic status toggling with instant feedback and completed timestamp tracking
+- ✅ Full provenance preservation: direct links back to verbatim clauses in Document Workspace
+
+### Phase 8 — Professional Prep
+- ✅ Deterministic consultation briefing assembling Executive Summary, Key Clauses, and Questions for Counsel
+- ✅ Objective discussion prompts framed neutrally for attorney meetings (no legal advice or negotiation strategy)
+- ✅ Integrated open review actions and user Q&A history
+- ✅ Multi-format export: one-click copy briefing as Markdown and print / save as PDF
+
+### Phase 9 — Document Comparison
+- ✅ Side-by-side comparative analysis of two contracts (`/compare`) with symmetrical evidence references
+- ✅ Deterministic hybrid alignment: normalized titles, canonical provision matching, and Jaccard fallback
+- ✅ Categorized difference items: `Modified`, `Added`, `Removed`, and `Unchanged`
+- ✅ Dynamic document selector pair with instant document swapping (`↔`) and URL state synchronization
+- ✅ Deep-link return paths directly into Document A and Document B workspaces
+
+### Phase 10 — Polish & Final Integration
+- ✅ WCAG 2.1 AA accessibility: Skip-to-main-content link, mobile responsive navigation drawer, and form ARIA relationships (`aria-invalid`, `aria-describedby`)
+- ✅ Accessible live regions: `role="status"` and `aria-live="polite"` during AI response streaming
+- ✅ Route loading skeletons (`loading.tsx`) across Dashboard, Documents, Compare, Actions, and Workspace
+- ✅ Robust error boundaries: root `app/error.tsx`, protected `app/(app)/error.tsx`, and branded `app/not-found.tsx`
+- ✅ Document Library on `/documents` with status badges, page counts, and "Open Workspace" actions
+- ✅ Real Dashboard mission control with live document metrics, recent documents, and empty-state onboarding guide
+- ✅ Database performance indexes on foreign keys (`userId`, `documentId`, `sectionId`)
+- ✅ Full regression test coverage: 48 unit test files and 9 Playwright E2E suites
+
 ---
 
 ## Architecture
@@ -252,14 +300,14 @@ clausewise/
 | 0 | Foundation (auth, DB, UI shell) | ✅ Complete |
 | 1 | Secure document upload | ✅ Complete |
 | 2 | Text extraction + document viewer | ✅ Complete |
-| 3 | Document intelligence (AI analysis) | ✅ Complete (Closed) |
-| 4 | Evidence-backed analysis display | 🔜 Next |
-| 5 | AI QA chat | 🔜 |
-| 6 | Document comparison | 🔜 |
-| 7 | Action plans | 🔜 |
-| 8 | Professional prep | 🔜 |
-| 9 | Polish and disclaimer hardening | 🔜 |
-| 10 | Accessibility, dark mode, CI | 🔜 |
+| 3 | Document intelligence (AI analysis) | ✅ Complete |
+| 4 | Analysis / Findings & Grounded Evidence | ✅ Complete |
+| 5 | Evidence-backed Q&A (SSE streaming) | ✅ Complete |
+| 6 | Contextual Assistant | ✅ Complete |
+| 7 | Action Center | ✅ Complete |
+| 8 | Professional Prep | ✅ Complete |
+| 9 | Document Comparison | ✅ Complete |
+| 10 | Polish & Final Integration | ✅ Complete |
 
 See [`docs/PHASE_PLAN.md`](docs/PHASE_PLAN.md) for full details.
 

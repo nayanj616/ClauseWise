@@ -946,6 +946,9 @@ export function AskPanel({
             <div
               className="flex justify-start animate-fade-in"
               data-testid="ask-streaming-message"
+              role="status"
+              aria-live="polite"
+              aria-atomic="false"
             >
               <div className="w-full rounded-xl border border-primary/30 bg-card p-5 shadow-sm space-y-3">
                 <div className="flex items-center justify-between border-b pb-2">

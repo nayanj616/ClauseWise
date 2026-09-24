@@ -1,6 +1,8 @@
 import { notFound } from "next/navigation";
 import { DocumentWorkspace } from "@/components/workspace/DocumentWorkspace";
 import { DocumentNotFoundState } from "@/components/workspace/WorkspaceStates";
+import { MobileNav } from "@/components/shared/MobileNav";
+import { Sidebar } from "@/components/shared/Sidebar";
 import type {
   DocumentWorkspaceData,
   DocumentFinding,
@@ -114,7 +116,7 @@ const mockFindings: DocumentFinding[] = [
     chunkId: null,
     findingType: "date",
     importance: "important",
-    label: "Agreement Effective Date",
+    label: "Effective Date & Initial Term",
     summary: "Commencement date for all contractual obligations and billing terms.",
     sourceText: "This Agreement shall commence on September 30, 2026",
     pageNumber: 1,
@@ -259,23 +261,50 @@ export default async function TestWorkspacePage({
     sections: mockSections,
   };
 
+  const user = {
+    name: "Test User",
+    email: "test@example.com",
+  };
+
   return (
-    <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto w-full">
-      <DocumentWorkspace
-        data={workspaceData}
-        findings={mockFindings}
-        initialTab={
-          tab === "document"
-            ? "document"
-            : tab === "ask"
-            ? "ask"
-            : tab === "prep"
-            ? "prep"
-            : "analysis"
-        }
-        initialFindingId={findingId}
-        initialSectionId={sectionId}
-      />
+    <div className="flex h-screen flex-col md:flex-row overflow-hidden bg-background">
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-50 focus:rounded-md focus:bg-primary focus:px-4 focus:py-2 focus:text-primary-foreground focus:shadow-md focus:outline-none focus:ring-2 focus:ring-ring"
+      >
+        Skip to main content
+      </a>
+
+      {/* Mobile top bar and drawer navigation (< md) */}
+      <MobileNav user={user} />
+
+      {/* Desktop Sidebar — fixed left column (>= md) */}
+      <Sidebar user={user} />
+
+      {/* Main content area */}
+      <main
+        className="flex flex-1 flex-col overflow-y-auto"
+        id="main-content"
+        tabIndex={-1}
+      >
+        <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto w-full">
+          <DocumentWorkspace
+            data={workspaceData}
+            findings={mockFindings}
+            initialTab={
+              tab === "document"
+                ? "document"
+                : tab === "ask"
+                ? "ask"
+                : tab === "prep"
+                ? "prep"
+                : "analysis"
+            }
+            initialFindingId={findingId}
+            initialSectionId={sectionId}
+          />
+        </div>
+      </main>
     </div>
   );
 }

@@ -227,6 +227,7 @@ export function CreateActionDialog({
         {/* Error message */}
         {errorMessage && (
           <div
+            id="create-action-error"
             role="alert"
             className="flex items-center gap-2 rounded-md border border-destructive/30 bg-destructive/10 p-2.5 text-xs text-destructive"
           >
@@ -252,6 +253,8 @@ export function CreateActionDialog({
               disabled={isSubmitting}
               className="text-xs"
               data-testid="create-action-title-input"
+              aria-invalid={Boolean(errorMessage)}
+              aria-describedby={errorMessage ? "create-action-error" : undefined}
             />
             <p className="text-[11px] text-muted-foreground text-right">
               {title.length}/300

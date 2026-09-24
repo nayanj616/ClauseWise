@@ -29,6 +29,7 @@ export function SignUpForm() {
       {/* Server action error */}
       {state?.error && (
         <div
+          id="signup-error"
           role="alert"
           className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive"
         >
@@ -46,6 +47,8 @@ export function SignUpForm() {
           placeholder="Your name"
           required
           minLength={2}
+          aria-invalid={Boolean(state?.error)}
+          aria-describedby={state?.error ? "signup-error" : undefined}
         />
       </div>
 
@@ -58,6 +61,8 @@ export function SignUpForm() {
           autoComplete="email"
           placeholder="you@example.com"
           required
+          aria-invalid={Boolean(state?.error)}
+          aria-describedby={state?.error ? "signup-error" : undefined}
         />
       </div>
 
@@ -71,6 +76,8 @@ export function SignUpForm() {
           placeholder="Min. 8 characters"
           required
           minLength={8}
+          aria-invalid={Boolean(state?.error)}
+          aria-describedby={state?.error ? "signup-error" : (undefined)}
         />
         <p className="text-xs text-muted-foreground">
           At least 8 characters.

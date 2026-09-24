@@ -55,10 +55,10 @@ export function Sidebar({ user }: SidebarProps) {
     : user.email.slice(0, 2).toUpperCase();
 
   return (
-    <aside className="flex h-full w-64 flex-col border-r bg-card">
+    <aside className="hidden md:flex h-full w-64 shrink-0 flex-col border-r bg-card">
       {/* Logo */}
       <div className="flex h-16 items-center border-b px-4">
-        <Link href="/dashboard" aria-label="ClauseWise home">
+        <Link href="/dashboard" aria-label="ClauseWise home" className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-md">
           <Logo size="md" />
         </Link>
       </div>
@@ -74,9 +74,9 @@ export function Sidebar({ user }: SidebarProps) {
               key={href}
               href={href}
               className={cn(
-                "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                 isActive
-                  ? "bg-primary text-primary-foreground"
+                  ? "bg-primary text-primary-foreground shadow-xs"
                   : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
               )}
               aria-current={isActive ? "page" : undefined}

@@ -153,7 +153,11 @@ export const documents = pgTable("document", {
   metadata: jsonb("metadata").$type<Record<string, unknown>>(),
   createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
-});
+}, (t) => ({
+  userIdIdx: index("idx_documents_user_id").on(t.userId),
+  statusIdx: index("idx_documents_status").on(t.status),
+  createdAtIdx: index("idx_documents_created_at").on(t.createdAt),
+}));
 
 // ---------------------------------------------------------------------------
 // DocumentSection — Phase 2
@@ -181,7 +185,10 @@ export const documentSections = pgTable("document_sections", {
   pageEnd: integer("page_end"),
   createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
-});
+}, (t) => ({
+  documentIdIdx: index("idx_document_sections_document_id").on(t.documentId),
+  orderIndexIdx: index("idx_document_sections_order_index").on(t.documentId, t.orderIndex),
+}));
 
 // ---------------------------------------------------------------------------
 // DocumentChunk — Phase 2 Slice 2.4
@@ -220,7 +227,10 @@ export const documentChunks = pgTable("document_chunks", {
   tokenCount: integer("token_count"),
   createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
-});
+}, (t) => ({
+  documentIdIdx: index("idx_document_chunks_document_id").on(t.documentId),
+  sectionIdIdx: index("idx_document_chunks_section_id").on(t.sectionId),
+}));
 
 // ---------------------------------------------------------------------------
 // DocumentFinding — Phase 3
