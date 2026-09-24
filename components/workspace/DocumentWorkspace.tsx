@@ -199,28 +199,12 @@ export function DocumentWorkspace({
   );
   const importantSections = React.useMemo(() => {
     const extraction = (metadata.extraction || {}) as Record<string, unknown>;
-    const rawList =
-      (metadata.importantSections as Array<Record<string, unknown>> | undefined) ||
-      (extraction.importantSections as Array<Record<string, unknown>> | undefined) ||
-      [];
-
-    return rawList.map((is, i) => {
-      const matchedSec = is.sectionId ? sectionsById.get(is.sectionId as string) : undefined;
-      const orderIdx =
-        typeof is.sectionOrderIndex === "number" && Number.isFinite(is.sectionOrderIndex)
-          ? is.sectionOrderIndex
-          : typeof is.orderIndex === "number" && Number.isFinite(is.orderIndex)
-          ? is.orderIndex
-          : matchedSec?.orderIndex ?? i;
-
-      return {
-        sectionId: (is.sectionId as string) || matchedSec?.id || "",
-        sectionOrderIndex: orderIdx,
-        title: (is.title as string) || matchedSec?.title || `Section ${orderIdx + 1}`,
-        reason: (is.reason as string) || "",
-      };
-    });
-  }, [metadata, sectionsById]);
+    return (
+      (metadata.importantSections as ValidatedImportantSection[] | undefined) ||
+      (extraction.importantSections as ValidatedImportantSection[] | undefined) ||
+      []
+    );
+  }, [metadata]);
 
   // Assemble or adapt Professional Prep briefing data
   const prepDataToRender: ProfessionalPrepData = React.useMemo(() => {

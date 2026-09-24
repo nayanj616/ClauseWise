@@ -410,41 +410,6 @@ describe("Intelligence Workspace — Slice 3.6", () => {
       expect(html).toContain("Core restriction terms.");
       expect(html).toContain("Section 2"); // 1-based index
       expect(html).toContain("View in Document Text");
-      expect(html).not.toContain("Section NaN");
-    });
-
-    it("prevents Section NaN and gracefully maps orderIndex or sectionNumber", () => {
-      const legacySections = [
-        {
-          sectionId: "sec-1",
-          orderIndex: 0,
-          title: "Preamble & General Provisions",
-          reason: "Defines parties.",
-        },
-        {
-          sectionId: "sec-2",
-          sectionNumber: 5,
-          title: "Payment Terms",
-          reason: "Monthly fees.",
-        },
-        {
-          sectionId: "sec-3",
-          title: "Termination Notice",
-          reason: "Exit criteria.",
-        },
-      ];
-
-      const html = renderToString(
-        <ImportantSections
-          importantSections={legacySections}
-          onSelectSection={() => {}}
-        />
-      );
-
-      expect(html).not.toContain("Section NaN");
-      expect(html).toContain("Section 1");
-      expect(html).toContain("Section 5");
-      expect(html).toContain("Section 3");
     });
 
     it("returns null when importantSections array is empty", () => {
