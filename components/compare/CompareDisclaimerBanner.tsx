@@ -23,7 +23,7 @@ export function CompareDisclaimerBanner({ className }: CompareDisclaimerBannerPr
       </div>
       <div className="space-y-1 text-xs sm:text-sm leading-relaxed">
         <h2 className="font-semibold text-foreground flex items-center gap-1.5 text-sm sm:text-base">
-          <span>Objective Comparison Only</span>
+          <span>Objective Document Comparison</span>
         </h2>
         <p className="text-muted-foreground text-xs leading-normal">
           ClauseWise Compare highlights factual text and metadata differences between two documents for organizational
