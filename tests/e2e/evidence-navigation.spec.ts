@@ -324,7 +324,7 @@ test.describe("Accessibility & Security Verification", () => {
 
     // Evidence panel updates to show Effective Date
     const evidencePanel = page.getByTestId("evidence-panel-active");
-    await expect(evidencePanel).toContainText("Agreement Effective Date");
+    await expect(evidencePanel).toContainText("Effective Date & Initial Term");
     await expect(evidencePanel).toContainText("This Agreement shall commence on September 30, 2026");
   });
 
