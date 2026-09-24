@@ -29,9 +29,11 @@ test.describe("Phase 10 — Full Integration Journey", () => {
     await expect(emailInput).toHaveAttribute("aria-invalid", "false");
 
     // Navigate to Sign-up
-    await page.getByRole("link", { name: "Sign up" }).click();
-    await expect(page).toHaveURL(/\/sign-up/);
-    await expect(page.getByRole("heading", { name: /Create your account/i })).toBeVisible();
+    await Promise.all([
+      page.waitForURL(/\/sign-up/),
+      page.getByRole("link", { name: "Sign up" }).click(),
+    ]);
+    await expect(page.getByRole("heading", { name: "Create an account" })).toBeVisible();
     await expect(page.getByLabel("Name")).toBeVisible();
   });
 
@@ -41,12 +43,19 @@ test.describe("Phase 10 — Full Integration Journey", () => {
     // Verify Workspace Header & Classification
     await expect(page.getByTestId("document-workspace-viewer")).toBeVisible();
     await expect(page.getByText("Master_Services_Agreement_2026.pdf")).toBeVisible();
-    await expect(page.getByTestId("workspace-doc-type-badge")).toBeVisible();
+    await expect(page.getByTestId("header-classification-badge")).toBeVisible();
 
     // Verify Document Overview structured cards
-    await expect(page.getByTestId("document-overview-card")).toBeVisible();
+    await expect(page.getByTestId("document-overview-section")).toBeVisible();
     await expect(page.getByText("Alpha Corp")).toBeVisible();
     await expect(page.getByText("State of Delaware")).toBeVisible();
+
+    // Verify Important Sections (Key Sections) renders without Section NaN
+    const keySections = page.getByTestId("important-sections-container");
+    await expect(keySections).toBeVisible();
+    await expect(keySections).not.toContainText("Section NaN");
+    await expect(keySections).toContainText("Section 1");
+    await expect(keySections).toContainText("Section 2");
 
     // Verify Findings section
     await expect(page.getByTestId("findings-and-evidence-section")).toBeVisible();
@@ -54,12 +63,12 @@ test.describe("Phase 10 — Full Integration Journey", () => {
     await expect(findingItem).toBeVisible();
 
     // Click "View in Document Text" on finding to test Evidence Highlight Deep Link
-    const viewTextBtn = page.getByTestId("view-in-doc-btn-finding-att-1").first();
+    const viewTextBtn = page.getByTestId("finding-view-in-doc-finding-att-1").first();
     await expect(viewTextBtn).toBeVisible();
     await viewTextBtn.click();
 
     // Document Text tab should become active and highlight the excerpt
-    await expect(page.getByTestId("document-viewer-container")).toBeVisible();
+    await expect(page.getByTestId("verbatim-document-panel")).toBeVisible();
     const highlight = page.locator("mark");
     await expect(highlight).toBeVisible();
   });
@@ -91,7 +100,7 @@ test.describe("Phase 10 — Full Integration Journey", () => {
 
     // Verify Questions / Discussion Prompts for Counsel (strictly no negotiation points)
     await expect(page.getByTestId("prep-questions-for-counsel")).toBeVisible();
-    await expect(page.getByText(/Discussion Prompts for Legal Counsel/i)).toBeVisible();
+    await expect(page.getByText(/Suggested Questions for Legal Counsel/i)).toBeVisible();
 
     // Verify Export controls (Copy Markdown & Print)
     const exportControls = page.getByTestId("prep-export-controls");
@@ -107,9 +116,9 @@ test.describe("Phase 10 — Full Integration Journey", () => {
     await expect(page.getByRole("heading", { name: "Action Center" })).toBeVisible();
 
     // Verify Status filter tabs (All, Open, Completed)
-    const allTab = page.getByTestId("action-tab-all");
-    const openTab = page.getByTestId("action-tab-open");
-    const completedTab = page.getByTestId("action-tab-completed");
+    const allTab = page.getByTestId("filter-all-button");
+    const openTab = page.getByTestId("filter-open-button");
+    const completedTab = page.getByTestId("filter-completed-button");
 
     await expect(allTab).toBeVisible();
     await expect(openTab).toBeVisible();
@@ -117,7 +126,7 @@ test.describe("Phase 10 — Full Integration Journey", () => {
 
     // Toggle filter to Open actions
     await openTab.click();
-    await expect(page.getByTestId("actions-list-open")).toBeVisible();
+    await expect(page.getByTestId("open-actions-list")).toBeVisible();
 
     // Verify Action Card with section provenance
     const firstAction = page.locator("[data-testid^='action-card-']").first();

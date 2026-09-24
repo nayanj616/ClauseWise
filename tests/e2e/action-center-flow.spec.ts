@@ -71,11 +71,11 @@ test.describe("Phase 7 — Action Center Flow", () => {
     const dialog = page.getByTestId("create-action-dialog");
     await expect(dialog).toBeVisible();
     await expect(dialog.getByText("Add to Action Center")).toBeVisible();
-    await expect(dialog.getByText("Agreement Effective Date")).toBeVisible();
+    await expect(dialog.getByText("Effective Date & Initial Term")).toBeVisible();
 
     // Verify prefilled title
     const titleInput = page.getByTestId("create-action-title-input");
-    await expect(titleInput).toHaveValue("Review Agreement Effective Date");
+    await expect(titleInput).toHaveValue("Review Effective Date & Initial Term");
 
     // Enter custom description
     const descInput = page.getByTestId("create-action-description-input");
@@ -90,7 +90,7 @@ test.describe("Phase 7 — Action Center Flow", () => {
     expect(capturedCreatePayload).toMatchObject({
       documentId: "test-doc-12345",
       findingId: "finding-date-1",
-      title: "Review Agreement Effective Date",
+      title: "Review Effective Date & Initial Term",
       description: "Verify start date with finance department.",
     });
 

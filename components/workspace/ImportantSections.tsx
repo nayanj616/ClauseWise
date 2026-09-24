@@ -9,7 +9,17 @@ import { cn } from "@/lib/utils";
 import type { ValidatedImportantSection } from "@/types";
 
 export interface ImportantSectionsProps {
-  importantSections?: ValidatedImportantSection[];
+  importantSections?: (
+    | ValidatedImportantSection
+    | {
+        sectionId?: string;
+        sectionOrderIndex?: number;
+        orderIndex?: number;
+        sectionNumber?: number;
+        title: string;
+        reason?: string;
+      }
+  )[];
   onSelectSection?: (orderIndex: number) => void;
   className?: string;
 }
@@ -41,42 +51,61 @@ export function ImportantSections({
       </CardHeader>
       <CardContent>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-          {importantSections.map((sec, idx) => (
-            <div
-              key={`${sec.sectionId || sec.sectionOrderIndex}-${idx}`}
-              className="rounded-lg border border-border/70 p-3.5 bg-muted/20 hover:bg-muted/40 transition-colors flex flex-col justify-between space-y-2.5"
-            >
-              <div className="space-y-1">
-                <div className="flex items-center justify-between gap-2">
-                  <Badge variant="outline" className="text-[10px] font-mono px-1.5 py-0">
-                    {`Section ${sec.sectionOrderIndex + 1}`}
-                  </Badge>
+          {importantSections.map((sec, idx) => {
+            const rawOrderIndex =
+              typeof sec.sectionOrderIndex === "number" && Number.isFinite(sec.sectionOrderIndex)
+                ? sec.sectionOrderIndex
+                : typeof (sec as { orderIndex?: number }).orderIndex === "number" &&
+                  Number.isFinite((sec as { orderIndex?: number }).orderIndex)
+                ? (sec as { orderIndex?: number }).orderIndex!
+                : typeof (sec as { sectionNumber?: number }).sectionNumber === "number" &&
+                  Number.isFinite((sec as { sectionNumber?: number }).sectionNumber)
+                ? (sec as { sectionNumber?: number }).sectionNumber! - 1
+                : idx;
+
+            const sectionDisplayNum =
+              typeof (sec as { sectionNumber?: number }).sectionNumber === "number" &&
+              Number.isFinite((sec as { sectionNumber?: number }).sectionNumber)
+                ? (sec as { sectionNumber?: number }).sectionNumber!
+                : rawOrderIndex + 1;
+
+            return (
+              <div
+                key={`${sec.sectionId || rawOrderIndex}-${idx}`}
+                className="rounded-lg border border-border/70 p-3.5 bg-muted/20 hover:bg-muted/40 transition-colors flex flex-col justify-between space-y-2.5"
+              >
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <Badge variant="outline" className="text-[10px] font-mono px-1.5 py-0">
+                      {`Section ${sectionDisplayNum}`}
+                    </Badge>
+                  </div>
+                  <h4 className="font-semibold text-sm text-foreground break-words">
+                    {sec.title}
+                  </h4>
+                  {sec.reason && (
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      {sec.reason}
+                    </p>
+                  )}
                 </div>
-                <h4 className="font-semibold text-sm text-foreground break-words">
-                  {sec.title}
-                </h4>
-                {sec.reason && (
-                  <p className="text-xs text-muted-foreground leading-relaxed">
-                    {sec.reason}
-                  </p>
+
+                {onSelectSection && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => onSelectSection(rawOrderIndex)}
+                    className="gap-1.5 self-start text-xs h-7 px-2 text-primary hover:text-primary hover:bg-primary/10"
+                    aria-label={`Jump to ${sec.title} in document text`}
+                  >
+                    <span>View in Document Text</span>
+                    <ArrowRight size={13} aria-hidden="true" />
+                  </Button>
                 )}
               </div>
-
-              {onSelectSection && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => onSelectSection(sec.sectionOrderIndex)}
-                  className="gap-1.5 self-start text-xs h-7 px-2 text-primary hover:text-primary hover:bg-primary/10"
-                  aria-label={`Jump to ${sec.title} in document text`}
-                >
-                  <span>View in Document Text</span>
-                  <ArrowRight size={13} aria-hidden="true" />
-                </Button>
-              )}
-            </div>
-          ))}
+            );
+          })}
         </div>
       </CardContent>
     </Card>
