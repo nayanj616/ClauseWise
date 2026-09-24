@@ -33,7 +33,6 @@ import {
   DocumentNotFoundError,
   ExtractionPersistenceError,
   type PersistenceResult,
-  type ProcessDocumentExtractionOptions,
 } from "./extraction-persistence-service";
 import {
   processDocumentIntelligence,
@@ -45,6 +44,7 @@ import {
   getDocumentChunks,
   deleteDocumentChunks,
   persistDocumentChunks,
+  generateAndPersistChunkEmbeddings,
   ChunkPersistenceError,
 } from "./chunk-persistence-service";
 
@@ -57,11 +57,11 @@ export {
   ExtractionPersistenceError,
   IntelligencePersistenceError,
   type PersistenceResult,
-  type ProcessDocumentExtractionOptions,
   type IntelligencePersistenceResult,
   getDocumentChunks,
   deleteDocumentChunks,
   persistDocumentChunks,
+  generateAndPersistChunkEmbeddings,
   ChunkPersistenceError,
 };
 
@@ -157,7 +157,7 @@ export async function uploadDocument(
 
   // 5. If requested, synchronously process extraction, chunking, and intelligence
   if (input.processExtraction) {
-    await processDocumentExtraction(createdDoc.id, { nextStatus: "analyzing" });
+    await processDocumentExtraction(createdDoc.id);
     const intelligenceResult = await processDocumentIntelligence(createdDoc.id);
     return intelligenceResult.document;
   }

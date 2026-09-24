@@ -45,6 +45,14 @@ vi.mock("@/lib/services/extraction-persistence-service", () => ({
   ExtractionPersistenceError: class ExtractionPersistenceError extends Error {},
 }));
 
+const mockProcessDocumentIntelligence = vi.fn();
+vi.mock("@/lib/services/intelligence-persistence-service", () => ({
+  processDocumentIntelligence: (...args: unknown[]) =>
+    mockProcessDocumentIntelligence(...args),
+  persistDocumentIntelligence: vi.fn(),
+  IntelligencePersistenceError: class IntelligencePersistenceError extends Error {},
+}));
+
 import { uploadDocument, DatabaseError } from "@/lib/services/document-service";
 import { DocumentValidationError } from "@/lib/validation/document-validation";
 
@@ -247,8 +255,12 @@ describe("uploadDocument service", () => {
       pageCount: 2,
     };
     mockProcessDocumentExtraction.mockResolvedValueOnce({
-      document: mockReadyDoc,
+      document: mockCreatedDoc,
       sections: [],
+    });
+    mockProcessDocumentIntelligence.mockResolvedValueOnce({
+      document: mockReadyDoc,
+      findings: [],
     });
 
     const result = await uploadDocument({
@@ -258,6 +270,7 @@ describe("uploadDocument service", () => {
     });
 
     expect(mockProcessDocumentExtraction).toHaveBeenCalledWith("doc-uuid-9999");
+    expect(mockProcessDocumentIntelligence).toHaveBeenCalledWith("doc-uuid-9999");
     expect(result.status).toBe("ready");
     expect(result.pageCount).toBe(2);
   });

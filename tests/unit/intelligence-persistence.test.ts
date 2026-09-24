@@ -17,6 +17,17 @@ vi.mock("@/lib/services/intelligence-service", () => ({
   OpenAiInferenceError: class OpenAiInferenceError extends Error {},
 }));
 
+// Mock chunk-persistence-service for embedding orchestration
+const mockGenerateAndPersistChunkEmbeddings = vi.fn();
+vi.mock("@/lib/services/chunk-persistence-service", () => ({
+  generateAndPersistChunkEmbeddings: (...args: unknown[]) =>
+    mockGenerateAndPersistChunkEmbeddings(...args),
+  getDocumentChunks: vi.fn(),
+  deleteDocumentChunks: vi.fn(),
+  persistDocumentChunks: vi.fn(),
+  ChunkPersistenceError: class ChunkPersistenceError extends Error {},
+}));
+
 // Mock database
 vi.mock("@/lib/db", () => {
   return {
@@ -85,6 +96,7 @@ describe("Intelligence Persistence Domain Service — Phase 3", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockGenerateAndPersistChunkEmbeddings.mockResolvedValue(1);
   });
 
   it("persists findings and updates document metadata inside a single atomic transaction", async () => {
@@ -239,6 +251,29 @@ describe("Intelligence Persistence Domain Service — Phase 3", () => {
 
     expect(result.document.status).toBe("ready");
     expect(result.findings).toHaveLength(1);
+    expect(mockGenerateAndPersistChunkEmbeddings).toHaveBeenCalledWith(mockDocId);
     expect(mockUpdate).toHaveBeenCalledWith(expect.anything());
+  });
+
+  it("transitions status to error and aborts intelligence if chunk embedding generation fails", async () => {
+    const mockUpdate = vi.fn().mockReturnValue({
+      set: vi.fn().mockReturnValue({
+        where: vi.fn().mockResolvedValue([]),
+      }),
+    });
+    (db.update as any) = mockUpdate;
+
+    mockGenerateAndPersistChunkEmbeddings.mockRejectedValueOnce(
+      new Error("Embedding service rate limit exceeded")
+    );
+
+    await expect(processDocumentIntelligence(mockDocId)).rejects.toThrow(
+      "Embedding service rate limit exceeded"
+    );
+
+    // Verify fallback status='error' was recorded
+    expect(mockUpdate).toHaveBeenCalledWith(expect.anything());
+    // Intelligence analysis was not called since embedding failed first
+    expect(mockAnalyzeDocumentIntelligence).not.toHaveBeenCalled();
   });
 });

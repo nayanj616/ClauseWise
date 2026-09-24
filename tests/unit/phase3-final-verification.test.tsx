@@ -94,6 +94,14 @@ vi.mock("@/lib/ai/openai-client", () => {
   };
 });
 
+vi.mock("@/lib/services/chunk-persistence-service", () => ({
+  generateAndPersistChunkEmbeddings: vi.fn().mockResolvedValue(0),
+  getDocumentChunks: vi.fn(),
+  deleteDocumentChunks: vi.fn(),
+  persistDocumentChunks: vi.fn(),
+  ChunkPersistenceError: class ChunkPersistenceError extends Error {},
+}));
+
 // =============================================================================
 // Verification Suite
 // =============================================================================

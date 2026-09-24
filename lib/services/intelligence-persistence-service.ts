@@ -21,7 +21,7 @@ import {
   type DocumentFinding,
 } from "@/lib/db/schema";
 import type { ValidatedIntelligenceResult } from "@/lib/intelligence/types";
-import { analyzeDocumentIntelligence } from "./intelligence-service";
+import { generateAndPersistChunkEmbeddings } from "./chunk-persistence-service";
 
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -216,10 +216,16 @@ export async function processDocumentIntelligence(
     .where(eq(documents.id, cleanDocId));
 
   try {
-    // 2. Execute analysis & evidence verification
+    // 2. Generate and persist chunk embeddings for semantic retrieval
+    await generateAndPersistChunkEmbeddings(cleanDocId);
+
+    // 3. Execute analysis & evidence verification
+    const { analyzeDocumentIntelligence } = await import(
+      "./intelligence-service"
+    );
     const validatedResult = await analyzeDocumentIntelligence(cleanDocId);
 
-    // 3. Atomically persist intelligence
+    // 4. Atomically persist intelligence
     return await persistDocumentIntelligence(validatedResult);
   } catch (error) {
     // Fallback: update status to error safely without corrupting Phase 2 data

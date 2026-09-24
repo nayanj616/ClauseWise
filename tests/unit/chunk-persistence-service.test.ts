@@ -32,12 +32,19 @@ type MockChunkRow = {
   content: string;
   pageNumber: number | null;
   tokenCount: number | null;
+  embedding: number[] | null;
   createdAt: Date;
   updatedAt: Date;
 };
 
 let inMemoryChunks: MockChunkRow[] = [];
 let shouldFailDb = false;
+
+const mockEmbedBatch = vi.fn();
+vi.mock("@/lib/embeddings/embeddings-client", () => ({
+  embedBatch: (...args: unknown[]) => mockEmbedBatch(...args),
+  embedText: vi.fn(),
+}));
 
 vi.mock("@/lib/db", () => {
   return {
@@ -49,10 +56,14 @@ vi.mock("@/lib/db", () => {
               if (shouldFailDb) {
                 throw new Error("Connection terminated: postgresql://postgres:secret@db.internal:5432");
               }
-              const docId = (condition as { docId?: string })?.docId;
-              const filtered = docId
+              const cond = condition as { docId?: string; isNull?: boolean };
+              const docId = cond?.docId;
+              let filtered = docId
                 ? inMemoryChunks.filter((c) => c.documentId === docId)
                 : inMemoryChunks;
+              if (cond?.isNull) {
+                filtered = filtered.filter((c) => c.embedding === null);
+              }
               return [...filtered].sort((a, b) => a.chunkIndex - b.chunkIndex);
             },
           }),
@@ -83,6 +94,7 @@ vi.mock("@/lib/db", () => {
               content: r.content,
               pageNumber: r.pageNumber ?? null,
               tokenCount: r.tokenCount ?? null,
+              embedding: null,
               createdAt: new Date(),
               updatedAt: new Date(),
             }));
@@ -91,12 +103,32 @@ vi.mock("@/lib/db", () => {
           },
         }),
       }),
+      update: () => ({
+        set: (vals: Record<string, unknown>) => ({
+          where: async (condition: unknown) => {
+            if (shouldFailDb) {
+              throw new Error("Connection terminated: postgresql://postgres:secret@db.internal:5432");
+            }
+            const chunkId = (condition as { chunkId?: string; docId?: string })?.chunkId;
+            const target = inMemoryChunks.find((c) => c.id === chunkId);
+            if (target) {
+              Object.assign(target, vals);
+            }
+          },
+        }),
+      }),
     },
   };
 });
 
 vi.mock("drizzle-orm", () => ({
-  eq: (_col: unknown, val: string) => ({ docId: val }),
+  eq: (_col: unknown, val: string) => ({ docId: val, chunkId: val }),
+  and: (...conditions: any[]) => {
+    const docId = conditions.find((c) => c?.docId)?.docId;
+    const isNull = conditions.some((c) => c?.isNull);
+    return { docId, isNull };
+  },
+  isNull: (_col: unknown) => ({ isNull: true }),
   asc: (_col: unknown) => "asc",
   relations: vi.fn(),
 }));
@@ -105,6 +137,7 @@ import {
   persistDocumentChunks,
   getDocumentChunks,
   deleteDocumentChunks,
+  generateAndPersistChunkEmbeddings,
   ChunkPersistenceError,
 } from "@/lib/services/chunk-persistence-service";
 
@@ -246,6 +279,7 @@ describe("Chunk Persistence Service (Slice 2.4)", () => {
           content: "Third chunk",
           pageNumber: 3,
           tokenCount: 3,
+          embedding: null,
           createdAt: new Date(),
           updatedAt: new Date(),
         },
@@ -257,6 +291,7 @@ describe("Chunk Persistence Service (Slice 2.4)", () => {
           content: "First chunk",
           pageNumber: 1,
           tokenCount: 3,
+          embedding: null,
           createdAt: new Date(),
           updatedAt: new Date(),
         },
@@ -268,6 +303,7 @@ describe("Chunk Persistence Service (Slice 2.4)", () => {
           content: "Second chunk",
           pageNumber: 2,
           tokenCount: 3,
+          embedding: null,
           createdAt: new Date(),
           updatedAt: new Date(),
         }
@@ -311,6 +347,7 @@ describe("Chunk Persistence Service (Slice 2.4)", () => {
           content: "Doc 1 Chunk",
           pageNumber: 1,
           tokenCount: 3,
+          embedding: null,
           createdAt: new Date(),
           updatedAt: new Date(),
         },
@@ -322,6 +359,7 @@ describe("Chunk Persistence Service (Slice 2.4)", () => {
           content: "Doc 2 Chunk",
           pageNumber: 1,
           tokenCount: 3,
+          embedding: null,
           createdAt: new Date(),
           updatedAt: new Date(),
         }
@@ -349,6 +387,191 @@ describe("Chunk Persistence Service (Slice 2.4)", () => {
         expect(error).toBeInstanceOf(ChunkPersistenceError);
         const err = error as ChunkPersistenceError;
         expect(err.message).toBe(`Failed to delete chunks for document ${VALID_DOC_ID}`);
+        expect(err.message).not.toContain("password");
+        expect(err.message).not.toContain("secret");
+      }
+    });
+  });
+
+  // =========================================================================
+  // 4. generateAndPersistChunkEmbeddings
+  // =========================================================================
+  describe("4. generateAndPersistChunkEmbeddings", () => {
+    it("generates and persists 1536-dimensional embeddings for all unembedded chunks", async () => {
+      inMemoryChunks.push(
+        {
+          id: "chunk-embed-1",
+          documentId: VALID_DOC_ID,
+          sectionId: VALID_SEC_ID,
+          chunkIndex: 0,
+          content: "Confidentiality obligations apply for five years.",
+          pageNumber: 1,
+          tokenCount: 7,
+          embedding: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+        {
+          id: "chunk-embed-2",
+          documentId: VALID_DOC_ID,
+          sectionId: VALID_SEC_ID,
+          chunkIndex: 1,
+          content: "Governing law shall be the laws of the State of Delaware.",
+          pageNumber: 2,
+          tokenCount: 10,
+          embedding: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        }
+      );
+
+      const mockVectors = [
+        new Array(1536).fill(0.1),
+        new Array(1536).fill(0.2),
+      ];
+      mockEmbedBatch.mockResolvedValueOnce(mockVectors);
+
+      const count = await generateAndPersistChunkEmbeddings(VALID_DOC_ID);
+
+      expect(count).toBe(2);
+      expect(mockEmbedBatch).toHaveBeenCalledTimes(1);
+      expect(mockEmbedBatch).toHaveBeenCalledWith([
+        "Confidentiality obligations apply for five years.",
+        "Governing law shall be the laws of the State of Delaware.",
+      ]);
+
+      const chunk1 = inMemoryChunks.find((c) => c.id === "chunk-embed-1");
+      const chunk2 = inMemoryChunks.find((c) => c.id === "chunk-embed-2");
+      expect(chunk1?.embedding).toEqual(mockVectors[0]);
+      expect(chunk2?.embedding).toEqual(mockVectors[1]);
+    });
+
+    it("batches embeddings in groups of 100 when document has more than 100 chunks", async () => {
+      // Create 150 chunks needing embeddings
+      for (let i = 0; i < 150; i++) {
+        inMemoryChunks.push({
+          id: `chunk-batch-${i}`,
+          documentId: VALID_DOC_ID,
+          sectionId: VALID_SEC_ID,
+          chunkIndex: i,
+          content: `Section content paragraph ${i}`,
+          pageNumber: Math.floor(i / 10) + 1,
+          tokenCount: 5,
+          embedding: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        });
+      }
+
+      mockEmbedBatch.mockImplementation(async (texts: string[]) => {
+        return texts.map(() => new Array(1536).fill(0.05));
+      });
+
+      const count = await generateAndPersistChunkEmbeddings(VALID_DOC_ID);
+
+      expect(count).toBe(150);
+      expect(mockEmbedBatch).toHaveBeenCalledTimes(2);
+      expect(mockEmbedBatch.mock.calls[0][0]).toHaveLength(100);
+      expect(mockEmbedBatch.mock.calls[1][0]).toHaveLength(50);
+      expect(inMemoryChunks.every((c) => c.embedding !== null)).toBe(true);
+    });
+
+    it("returns 0 and skips embedBatch when all chunks already have embeddings", async () => {
+      inMemoryChunks.push({
+        id: "chunk-already-embedded",
+        documentId: VALID_DOC_ID,
+        sectionId: VALID_SEC_ID,
+        chunkIndex: 0,
+        content: "Already has an embedding vector.",
+        pageNumber: 1,
+        tokenCount: 6,
+        embedding: new Array(1536).fill(0.3),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      const count = await generateAndPersistChunkEmbeddings(VALID_DOC_ID);
+
+      expect(count).toBe(0);
+      expect(mockEmbedBatch).not.toHaveBeenCalled();
+    });
+
+    it("returns 0 and skips embedBatch when document has no chunks", async () => {
+      const count = await generateAndPersistChunkEmbeddings(VALID_DOC_ID);
+
+      expect(count).toBe(0);
+      expect(mockEmbedBatch).not.toHaveBeenCalled();
+    });
+
+    it("rejects invalid documentId format", async () => {
+      await expect(generateAndPersistChunkEmbeddings("invalid-uuid")).rejects.toThrow(
+        ChunkPersistenceError
+      );
+      await expect(generateAndPersistChunkEmbeddings("   ")).rejects.toThrow(
+        "Invalid document ID"
+      );
+    });
+
+    it("throws ChunkPersistenceError when embedBatch returns mismatched count", async () => {
+      inMemoryChunks.push(
+        {
+          id: "chunk-mismatch-1",
+          documentId: VALID_DOC_ID,
+          sectionId: VALID_SEC_ID,
+          chunkIndex: 0,
+          content: "First chunk",
+          pageNumber: 1,
+          tokenCount: 2,
+          embedding: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+        {
+          id: "chunk-mismatch-2",
+          documentId: VALID_DOC_ID,
+          sectionId: VALID_SEC_ID,
+          chunkIndex: 1,
+          content: "Second chunk",
+          pageNumber: 1,
+          tokenCount: 2,
+          embedding: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        }
+      );
+
+      // Return only 1 embedding for 2 chunks
+      mockEmbedBatch.mockResolvedValueOnce([new Array(1536).fill(0.1)]);
+
+      await expect(generateAndPersistChunkEmbeddings(VALID_DOC_ID)).rejects.toThrow(
+        "Embedding batch count mismatch: expected 2, received 1"
+      );
+    });
+
+    it("sanitizes database error on update without leaking credentials", async () => {
+      inMemoryChunks.push({
+        id: "chunk-fail",
+        documentId: VALID_DOC_ID,
+        sectionId: VALID_SEC_ID,
+        chunkIndex: 0,
+        content: "Chunk content",
+        pageNumber: 1,
+        tokenCount: 2,
+        embedding: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      mockEmbedBatch.mockResolvedValueOnce([new Array(1536).fill(0.1)]);
+      shouldFailDb = true;
+
+      try {
+        await generateAndPersistChunkEmbeddings(VALID_DOC_ID);
+        expect.unreachable("Should have thrown");
+      } catch (error) {
+        expect(error).toBeInstanceOf(ChunkPersistenceError);
+        const err = error as ChunkPersistenceError;
+        expect(err.message).toContain(`Failed to generate and persist embeddings for document ${VALID_DOC_ID}`);
         expect(err.message).not.toContain("password");
         expect(err.message).not.toContain("secret");
       }
