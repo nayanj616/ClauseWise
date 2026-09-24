@@ -254,7 +254,6 @@ import {
   DocumentNotFoundError,
   ExtractionPersistenceError,
 } from "@/lib/services/extraction-persistence-service";
-import { uploadDocument } from "@/lib/services/document-service";
 
 // ---------------------------------------------------------------------------
 // Helpers & Fixtures
@@ -744,6 +743,16 @@ describe("Extraction Persistence Service (Slice 2.2)", () => {
       const processed = await processDocumentExtraction(VALID_DOC_ID);
       expect(processed.document.status).toBe("ready");
       expect(processed.sections.length).toBeGreaterThan(0);
+    });
+
+    it("transitions document to analyzing when nextStatus: analyzing option is provided", async () => {
+      seedDocument(VALID_DOC_ID, { title: "pipeline-test.pdf", status: "queued" });
+      mockDownloadDocumentFile.mockResolvedValue(Buffer.from("%PDF-1.4\ncontent"));
+      mockExtractDocumentText.mockResolvedValue(createSamplePdfExtraction());
+
+      const processed = await processDocumentExtraction(VALID_DOC_ID, { nextStatus: "analyzing" });
+      expect(processed.document.status).toBe("analyzing");
+      expect(inMemoryDocs.get(VALID_DOC_ID)?.status).toBe("analyzing");
     });
   });
 });

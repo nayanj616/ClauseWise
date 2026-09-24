@@ -69,6 +69,12 @@ vi.mock("@/lib/services/extraction-persistence-service", () => ({
   ExtractionPersistenceError: class ExtractionPersistenceError extends Error {},
 }));
 
+vi.mock("@/lib/services/intelligence-persistence-service", () => ({
+  processDocumentIntelligence: vi.fn(),
+  persistDocumentIntelligence: vi.fn(),
+  IntelligencePersistenceError: class IntelligencePersistenceError extends Error {},
+}));
+
 import {
   getDocumentWorkspaceData,
   DatabaseError,

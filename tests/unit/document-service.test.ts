@@ -45,6 +45,13 @@ vi.mock("@/lib/services/extraction-persistence-service", () => ({
   ExtractionPersistenceError: class ExtractionPersistenceError extends Error {},
 }));
 
+const mockProcessDocumentIntelligence = vi.fn();
+vi.mock("@/lib/services/intelligence-persistence-service", () => ({
+  processDocumentIntelligence: (...args: unknown[]) => mockProcessDocumentIntelligence(...args),
+  persistDocumentIntelligence: vi.fn(),
+  IntelligencePersistenceError: class IntelligencePersistenceError extends Error {},
+}));
+
 import { uploadDocument, DatabaseError } from "@/lib/services/document-service";
 import { DocumentValidationError } from "@/lib/validation/document-validation";
 
@@ -221,7 +228,7 @@ describe("uploadDocument service", () => {
     expect(storagePath).not.toContain("..");
   });
 
-  it("invokes processDocumentExtraction synchronously and returns ready document when processExtraction is true", async () => {
+  it("invokes processDocumentExtraction and processDocumentIntelligence sequentially and returns the final analyzed document when processExtraction is true", async () => {
     const file = createValidPdfFile("auto-process.pdf");
     const mockCreatedDoc = {
       id: "doc-uuid-9999",
@@ -241,14 +248,26 @@ describe("uploadDocument service", () => {
     };
     mockReturning.mockResolvedValueOnce([mockCreatedDoc]);
 
-    const mockReadyDoc = {
+    const mockExtractedDoc = {
       ...mockCreatedDoc,
-      status: "ready" as const,
+      status: "analyzing" as const,
       pageCount: 2,
     };
     mockProcessDocumentExtraction.mockResolvedValueOnce({
-      document: mockReadyDoc,
+      document: mockExtractedDoc,
       sections: [],
+      chunks: [],
+    });
+
+    const mockAnalyzedDoc = {
+      ...mockExtractedDoc,
+      status: "ready" as const,
+      documentType: "nda",
+      parties: [{ name: "Acme Corp", role: "disclosing_party" }],
+    };
+    mockProcessDocumentIntelligence.mockResolvedValueOnce({
+      document: mockAnalyzedDoc,
+      findings: [],
     });
 
     const result = await uploadDocument({
@@ -257,8 +276,94 @@ describe("uploadDocument service", () => {
       processExtraction: true,
     });
 
-    expect(mockProcessDocumentExtraction).toHaveBeenCalledWith("doc-uuid-9999");
+    expect(mockProcessDocumentExtraction).toHaveBeenCalledWith("doc-uuid-9999", {
+      nextStatus: "analyzing",
+    });
+    expect(mockProcessDocumentIntelligence).toHaveBeenCalledWith("doc-uuid-9999");
     expect(result.status).toBe("ready");
     expect(result.pageCount).toBe(2);
+    expect(result.documentType).toBe("nda");
+  });
+
+  it("aborts pipeline and does not invoke processDocumentIntelligence when processDocumentExtraction fails", async () => {
+    const file = createValidPdfFile("extraction-fail.pdf");
+    const mockCreatedDoc = {
+      id: "doc-uuid-8888",
+      userId: TEST_USER_ID,
+      title: "extraction-fail.pdf",
+      originalFilename: "extraction-fail.pdf",
+      storagePath: `${TEST_USER_ID}/doc-uuid-8888/extraction-fail.pdf`,
+      mimeType: "application/pdf",
+      fileSizeBytes: file.size,
+      pageCount: null,
+      status: "queued" as const,
+      errorMessage: null,
+      governingLaw: null,
+      jurisdiction: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    mockReturning.mockResolvedValueOnce([mockCreatedDoc]);
+
+    mockProcessDocumentExtraction.mockRejectedValueOnce(
+      new Error("Failed to extract document sections")
+    );
+
+    await expect(
+      uploadDocument({
+        userId: TEST_USER_ID,
+        file,
+        processExtraction: true,
+      })
+    ).rejects.toThrow("Failed to extract document sections");
+
+    expect(mockProcessDocumentExtraction).toHaveBeenCalledWith("doc-uuid-8888", {
+      nextStatus: "analyzing",
+    });
+    expect(mockProcessDocumentIntelligence).not.toHaveBeenCalled();
+  });
+
+  it("propagates error when processDocumentIntelligence fails after successful extraction", async () => {
+    const file = createValidPdfFile("intelligence-fail.pdf");
+    const mockCreatedDoc = {
+      id: "doc-uuid-7777",
+      userId: TEST_USER_ID,
+      title: "intelligence-fail.pdf",
+      originalFilename: "intelligence-fail.pdf",
+      storagePath: `${TEST_USER_ID}/doc-uuid-7777/intelligence-fail.pdf`,
+      mimeType: "application/pdf",
+      fileSizeBytes: file.size,
+      pageCount: null,
+      status: "queued" as const,
+      errorMessage: null,
+      governingLaw: null,
+      jurisdiction: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    mockReturning.mockResolvedValueOnce([mockCreatedDoc]);
+
+    mockProcessDocumentExtraction.mockResolvedValueOnce({
+      document: { ...mockCreatedDoc, status: "analyzing" as const },
+      sections: [],
+      chunks: [],
+    });
+
+    mockProcessDocumentIntelligence.mockRejectedValueOnce(
+      new Error("OpenAI inference timeout during analysis")
+    );
+
+    await expect(
+      uploadDocument({
+        userId: TEST_USER_ID,
+        file,
+        processExtraction: true,
+      })
+    ).rejects.toThrow("OpenAI inference timeout during analysis");
+
+    expect(mockProcessDocumentExtraction).toHaveBeenCalledWith("doc-uuid-7777", {
+      nextStatus: "analyzing",
+    });
+    expect(mockProcessDocumentIntelligence).toHaveBeenCalledWith("doc-uuid-7777");
   });
 });

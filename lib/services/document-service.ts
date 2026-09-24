@@ -33,7 +33,14 @@ import {
   DocumentNotFoundError,
   ExtractionPersistenceError,
   type PersistenceResult,
+  type ProcessDocumentExtractionOptions,
 } from "./extraction-persistence-service";
+import {
+  processDocumentIntelligence,
+  persistDocumentIntelligence,
+  IntelligencePersistenceError,
+  type IntelligencePersistenceResult,
+} from "./intelligence-persistence-service";
 import {
   getDocumentChunks,
   deleteDocumentChunks,
@@ -44,9 +51,14 @@ import {
 export {
   persistDocumentExtraction,
   processDocumentExtraction,
+  processDocumentIntelligence,
+  persistDocumentIntelligence,
   DocumentNotFoundError,
   ExtractionPersistenceError,
+  IntelligencePersistenceError,
   type PersistenceResult,
+  type ProcessDocumentExtractionOptions,
+  type IntelligencePersistenceResult,
   getDocumentChunks,
   deleteDocumentChunks,
   persistDocumentChunks,
@@ -64,8 +76,8 @@ export interface UploadDocumentServiceInput {
   userId: string;
   file: File | { name: string; type: string; size: number; arrayBuffer(): Promise<ArrayBuffer> };
   /**
-   * Whether to synchronously trigger document extraction and persistence.
-   * When true, transitions document queued -> extracting -> ready (or error).
+   * Whether to synchronously trigger document extraction and intelligence.
+   * When true, transitions document queued -> extracting -> analyzing -> ready (or error).
    * Defaults to false for backwards compatibility with Phase 1 caller contracts.
    */
   processExtraction?: boolean;
@@ -76,12 +88,12 @@ export interface UploadDocumentServiceInput {
  * 1. Validates file (size, MIME, extension, signatures) — fails before mutations
  * 2. Uploads file to private Supabase Storage
  * 3. Creates Document record in database with initial status 'queued'
- * 4. Optionally processes extraction synchronously (status -> extracting -> ready)
+ * 4. Optionally processes extraction and intelligence synchronously (queued -> extracting -> analyzing -> ready)
  * 5. Rolls back storage object if database insert fails
  *
  * @param input.userId - The authenticated session user ID (never from client body)
  * @param input.file - The uploaded file object
- * @param input.processExtraction - If true, synchronously processes extraction and persists sections
+ * @param input.processExtraction - If true, synchronously processes extraction, chunking, and intelligence
  * @returns The created (or processed) Document record
  */
 export async function uploadDocument(
@@ -143,10 +155,11 @@ export async function uploadDocument(
     });
   }
 
-  // 5. If requested, synchronously process extraction and section persistence
+  // 5. If requested, synchronously process extraction, chunking, and intelligence
   if (input.processExtraction) {
-    const extractionResult = await processDocumentExtraction(createdDoc.id);
-    return extractionResult.document;
+    await processDocumentExtraction(createdDoc.id, { nextStatus: "analyzing" });
+    const intelligenceResult = await processDocumentIntelligence(createdDoc.id);
+    return intelligenceResult.document;
   }
 
   return createdDoc;
