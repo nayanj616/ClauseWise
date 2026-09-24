@@ -24,7 +24,6 @@ import {
   type Document,
   type DocumentSection,
   type DocumentChunk,
-  type DocumentStatus,
 } from "@/lib/db/schema";
 import { downloadDocumentFile } from "@/lib/storage/storage-client";
 import { extractDocumentText } from "@/lib/services/extraction-service";
@@ -56,15 +55,6 @@ export interface PersistenceResult {
   document: Document;
   sections: DocumentSection[];
   chunks: DocumentChunk[];
-}
-
-export interface ProcessDocumentExtractionOptions {
-  /**
-   * The status to transition the document to upon successful persistence.
-   * Defaults to 'ready' when extraction runs standalone.
-   * Set to 'analyzing' when chained directly into the intelligence pipeline.
-   */
-  nextStatus?: DocumentStatus;
 }
 
 /**
@@ -148,8 +138,7 @@ async function recordDocumentErrorSafely(
  */
 export async function persistDocumentExtraction(
   documentId: string,
-  extractionResult: DocumentExtractionResult,
-  options?: ProcessDocumentExtractionOptions
+  extractionResult: DocumentExtractionResult
 ): Promise<PersistenceResult> {
   assertValidDocumentId(documentId);
   assertValidExtractionResult(extractionResult);
@@ -214,12 +203,11 @@ export async function persistDocumentExtraction(
       // 6. Persist chunks
       const insertedChunks = await persistDocumentChunks(generatedChunks, tx);
 
-      // 7. Update document extraction metadata and transition to nextStatus (defaults to 'ready')
-      const targetStatus: DocumentStatus = options?.nextStatus ?? "ready";
+      // 7. Update document extraction metadata and transition to 'ready'
       const [updatedDoc] = await tx
         .update(documents)
         .set({
-          status: targetStatus,
+          status: "ready",
           pageCount:
             typeof extractionResult.pageCount === "number"
               ? extractionResult.pageCount
@@ -232,7 +220,7 @@ export async function persistDocumentExtraction(
 
       if (!updatedDoc) {
         throw new ExtractionPersistenceError(
-          `Failed to update document status to ${targetStatus} for ${cleanDocId}`
+          `Failed to update document status to ready for ${cleanDocId}`
         );
       }
 
@@ -284,8 +272,7 @@ export async function persistDocumentExtraction(
  * @returns Updated document record and persisted sections
  */
 export async function processDocumentExtraction(
-  documentId: string,
-  options?: ProcessDocumentExtractionOptions
+  documentId: string
 ): Promise<PersistenceResult> {
   assertValidDocumentId(documentId);
   const cleanDocId = documentId.trim();
@@ -340,6 +327,6 @@ export async function processDocumentExtraction(
   }
 
   // 5. Persist extraction result atomically
-  return await persistDocumentExtraction(cleanDocId, extractionResult, options);
+  return await persistDocumentExtraction(cleanDocId, extractionResult);
 }
 
