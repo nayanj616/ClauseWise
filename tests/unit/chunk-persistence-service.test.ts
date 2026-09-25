@@ -397,7 +397,7 @@ describe("Chunk Persistence Service (Slice 2.4)", () => {
   // 4. generateAndPersistChunkEmbeddings
   // =========================================================================
   describe("4. generateAndPersistChunkEmbeddings", () => {
-    it("generates and persists 1536-dimensional embeddings for all unembedded chunks", async () => {
+    it("generates and persists 768-dimensional embeddings for all unembedded chunks", async () => {
       inMemoryChunks.push(
         {
           id: "chunk-embed-1",
@@ -426,8 +426,8 @@ describe("Chunk Persistence Service (Slice 2.4)", () => {
       );
 
       const mockVectors = [
-        new Array(1536).fill(0.1),
-        new Array(1536).fill(0.2),
+        new Array(768).fill(0.1),
+        new Array(768).fill(0.2),
       ];
       mockEmbedBatch.mockResolvedValueOnce(mockVectors);
 
@@ -464,7 +464,7 @@ describe("Chunk Persistence Service (Slice 2.4)", () => {
       }
 
       mockEmbedBatch.mockImplementation(async (texts: string[]) => {
-        return texts.map(() => new Array(1536).fill(0.05));
+        return texts.map(() => new Array(768).fill(0.05));
       });
 
       const count = await generateAndPersistChunkEmbeddings(VALID_DOC_ID);
@@ -485,7 +485,7 @@ describe("Chunk Persistence Service (Slice 2.4)", () => {
         content: "Already has an embedding vector.",
         pageNumber: 1,
         tokenCount: 6,
-        embedding: new Array(1536).fill(0.3),
+        embedding: new Array(768).fill(0.3),
         createdAt: new Date(),
         updatedAt: new Date(),
       });
@@ -541,11 +541,33 @@ describe("Chunk Persistence Service (Slice 2.4)", () => {
       );
 
       // Return only 1 embedding for 2 chunks
-      mockEmbedBatch.mockResolvedValueOnce([new Array(1536).fill(0.1)]);
+      mockEmbedBatch.mockResolvedValueOnce([new Array(768).fill(0.1)]);
 
       await expect(generateAndPersistChunkEmbeddings(VALID_DOC_ID)).rejects.toThrow(
         "Embedding batch count mismatch: expected 2, received 1"
       );
+    });
+
+    it("blocks 1536-dimensional OpenAI embeddings from being written into vector(768) column", async () => {
+      inMemoryChunks.push({
+        id: "chunk-dim-guard",
+        documentId: VALID_DOC_ID,
+        sectionId: VALID_SEC_ID,
+        chunkIndex: 0,
+        content: "Guard against 1536d vectors.",
+        pageNumber: 1,
+        tokenCount: 5,
+        embedding: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      mockEmbedBatch.mockResolvedValueOnce([new Array(1536).fill(0.1)]);
+
+      await expect(generateAndPersistChunkEmbeddings(VALID_DOC_ID)).rejects.toThrow(
+        "Embedding dimension mismatch: expected 768 dimensions for vector(768) column, received 1536"
+      );
+      expect(inMemoryChunks[0].embedding).toBeNull();
     });
 
     it("sanitizes database error on update without leaking credentials", async () => {
@@ -562,7 +584,7 @@ describe("Chunk Persistence Service (Slice 2.4)", () => {
         updatedAt: new Date(),
       });
 
-      mockEmbedBatch.mockResolvedValueOnce([new Array(1536).fill(0.1)]);
+      mockEmbedBatch.mockResolvedValueOnce([new Array(768).fill(0.1)]);
       shouldFailDb = true;
 
       try {

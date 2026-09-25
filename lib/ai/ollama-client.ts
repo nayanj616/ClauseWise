@@ -206,10 +206,14 @@ export function extractCleanJsonString(rawContent: string): string {
 
 /**
  * Converts a Zod schema into a JSON Schema object suitable for Ollama's `format` parameter.
+ * When `messages` contain `CHUNK_ID: <id>` blocks and the schema has a `citedChunkIds` array,
+ * constrains `citedChunkIds.items.enum` to the supplied chunk IDs so small local models
+ * (`qwen3:4b`) do not corrupt 36-character UUIDs with token-level typos.
  */
 export function buildOllamaJsonSchema<T>(
   schema: z.ZodType<T>,
-  name: string
+  name: string,
+  messages?: ChatMessage[]
 ): Record<string, unknown> {
   const formatObj = zodResponseFormat(schema, name);
   const rawSchema = formatObj.json_schema?.schema;
@@ -218,7 +222,29 @@ export function buildOllamaJsonSchema<T>(
       `Failed to derive JSON schema for structured output "${name}".`
     );
   }
-  return rawSchema as Record<string, unknown>;
+
+  const cloned = JSON.parse(JSON.stringify(rawSchema)) as Record<string, unknown>;
+  if (messages && messages.length > 0) {
+    const candidateIds = new Set<string>();
+    const regex = /CHUNK_ID:\s*([^\r\n]+)/g;
+    for (const msg of messages) {
+      let match: RegExpExecArray | null;
+      while ((match = regex.exec(msg.content)) !== null) {
+        const id = match[1]?.trim();
+        if (id) candidateIds.add(id);
+      }
+    }
+
+    if (candidateIds.size > 0) {
+      const props = cloned.properties as Record<string, unknown> | undefined;
+      const citedProp = props?.citedChunkIds as Record<string, unknown> | undefined;
+      if (citedProp && citedProp.type === "array" && citedProp.items && typeof citedProp.items === "object") {
+        (citedProp.items as Record<string, unknown>).enum = Array.from(candidateIds);
+      }
+    }
+  }
+
+  return cloned;
 }
 
 /**
@@ -434,7 +460,11 @@ export async function generateOllamaStructuredOutput<T>(
       ? options.retryDelayMs
       : AI_LIMITS.RETRY_BASE_DELAY_MS;
 
-  const jsonSchema = buildOllamaJsonSchema(options.schema, options.name);
+  const jsonSchema = buildOllamaJsonSchema(
+    options.schema,
+    options.name,
+    options.messages
+  );
   const fetchFn = getFetch();
 
   let lastError: OpenAiClientError | null = null;
@@ -597,7 +627,11 @@ export async function* streamOllamaStructuredChat<T>(
       ? config.chatModel
       : requestedModel;
   const temperature = options.temperature ?? TEMPERATURES.QA;
-  const jsonSchema = buildOllamaJsonSchema(options.schema, options.name);
+  const jsonSchema = buildOllamaJsonSchema(
+    options.schema,
+    options.name,
+    options.messages
+  );
   const fetchFn = getFetch();
 
   let response: Response;

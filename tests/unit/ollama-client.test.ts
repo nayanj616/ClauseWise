@@ -256,21 +256,17 @@ Let's check section 1 of the NDA. The governing law is Delaware.
   });
 
   // =========================================================================
-  // 3. Embedding Generation (nomic-embed-text 768d & OpenAI 1536d Fallback)
+  // 3. Embedding Generation (nomic-embed-text 768d & 1536d Guard)
   // =========================================================================
-  describe("3. Embedding Generation (768d Ollama vs 1536d OpenAI fallback)", () => {
-    it("defaults to OpenAI (1536 dimensions) while DB schema is vector(1536)", () => {
-      expect(EMBEDDING_DIMENSIONS).toBe(1536);
+  describe("3. Embedding Generation (768d Ollama & 1536d Dimension Guard)", () => {
+    it("defaults to Ollama nomic-embed-text (768 dimensions) matching vector(768) schema", () => {
+      expect(EMBEDDING_DIMENSIONS).toBe(768);
       expect(OPENAI_EMBEDDING_DIMENSIONS).toBe(1536);
-      expect(getActiveEmbeddingProvider()).toBe("openai");
-      expect(getActiveEmbeddingDimensions()).toBe(1536);
-    });
-
-    it("generates 768-dimensional vectors using nomic-embed-text when EMBEDDING_PROVIDER=ollama", async () => {
-      process.env.EMBEDDING_PROVIDER = "ollama";
       expect(getActiveEmbeddingProvider()).toBe("ollama");
       expect(getActiveEmbeddingDimensions()).toBe(768);
+    });
 
+    it("generates 768-dimensional vectors using nomic-embed-text by default", async () => {
       const vec1 = Array.from({ length: 768 }, (_, i) => Number((i * 0.001).toFixed(4)));
       const vec2 = Array.from({ length: 768 }, (_, i) => Number(((i + 1) * 0.001).toFixed(4)));
 
@@ -300,7 +296,27 @@ Let's check section 1 of the NDA. The governing law is Delaware.
       expect(body.input).toHaveLength(2);
     });
 
-    it("rejects embeddings whose dimensions do not match expected 768 dimensions", async () => {
+    it("strictly blocks OpenAI embeddings before any API call while column is vector(768)", async () => {
+      process.env.EMBEDDING_PROVIDER = "openai";
+      const openAiEmbedSpy = vi.fn(async () => ({
+        data: [{ index: 0, embedding: new Array(1536).fill(0.01) }],
+      }));
+      setOpenAiClientForTesting({
+        embeddings: {
+          create: openAiEmbedSpy,
+        },
+      } as unknown as Parameters<typeof setOpenAiClientForTesting>[0]);
+
+      await expect(embedText("Test clause")).rejects.toThrow(
+        /1,536-dimensional OpenAI embeddings cannot be written into a 768-dimensional column/
+      );
+      await expect(embedBatch(["Test clause"])).rejects.toThrow(
+        /1,536-dimensional OpenAI embeddings cannot be written into a 768-dimensional column/
+      );
+      expect(openAiEmbedSpy).not.toHaveBeenCalled();
+    });
+
+    it("rejects Ollama embeddings whose dimensions do not match expected 768 dimensions", async () => {
       const wrongDimVec = new Array(384).fill(0.05);
       mockFetch.mockResolvedValueOnce(
         new Response(

@@ -508,11 +508,16 @@ export async function retrieveDocumentEvidence(
     }
   }
 
-  // 3. Question Embedding via existing OpenAI integration
+  // 3. Question Embedding via 768-dimensional embedding client (nomic-embed-text)
   let queryEmbedding: number[];
   try {
     const { embedText } = await import("@/lib/embeddings/embeddings-client");
     queryEmbedding = await embedText(question);
+    if (!Array.isArray(queryEmbedding) || queryEmbedding.length !== 768) {
+      throw new Error(
+        `Query embedding dimension mismatch: expected 768 dimensions for vector(768), received ${Array.isArray(queryEmbedding) ? queryEmbedding.length : 0}`
+      );
+    }
   } catch (error) {
     console.error(
       `[retrieveDocumentEvidence] Embedding failed for doc ${documentId}:`,

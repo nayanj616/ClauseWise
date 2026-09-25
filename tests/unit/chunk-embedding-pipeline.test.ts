@@ -34,12 +34,12 @@ let mockDocs: Array<{ id: string; userId: string; status: string }> = [];
 
 vi.mock("@/lib/embeddings/embeddings-client", () => ({
   embedBatch: vi.fn(async (texts: string[]) => {
-    // Generate deterministic 1536-dimensional vectors
-    return texts.map((_, i) => new Array(1536).fill((i + 1) * 0.01));
+    // Generate deterministic 768-dimensional vectors
+    return texts.map((_, i) => new Array(768).fill((i + 1) * 0.01));
   }),
   embedText: vi.fn(async (_text: string) => {
     // Return query vector that has high similarity to the first chunk
-    return new Array(1536).fill(0.01);
+    return new Array(768).fill(0.01);
   }),
 }));
 
@@ -179,11 +179,11 @@ describe("Phase B — Chunk Embedding to Q&A Retrieval Integration Pipeline", ()
     const embeddedCount = await generateAndPersistChunkEmbeddings(VALID_DOC_ID);
     expect(embeddedCount).toBe(2);
 
-    // Verify database chunks now hold 1536-dimensional non-null vectors
+    // Verify database chunks now hold 768-dimensional non-null vectors
     expect(mockChunks[0].embedding).not.toBeNull();
-    expect(mockChunks[0].embedding).toHaveLength(1536);
+    expect(mockChunks[0].embedding).toHaveLength(768);
     expect(mockChunks[1].embedding).not.toBeNull();
-    expect(mockChunks[1].embedding).toHaveLength(1536);
+    expect(mockChunks[1].embedding).toHaveLength(768);
 
     // 4. After embedding generation: retrieval succeeds and finds the evidence chunks
     const afterResult = await retrieveDocumentEvidence({

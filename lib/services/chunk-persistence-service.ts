@@ -200,6 +200,15 @@ export async function generateAndPersistChunkEmbeddings(
         );
       }
 
+      const EXPECTED_VECTOR_DIMENSIONS = 768;
+      for (const vec of embeddings) {
+        if (!Array.isArray(vec) || vec.length !== EXPECTED_VECTOR_DIMENSIONS) {
+          throw new ChunkPersistenceError(
+            `Embedding dimension mismatch: expected ${EXPECTED_VECTOR_DIMENSIONS} dimensions for vector(768) column, received ${Array.isArray(vec) ? vec.length : 0}`
+          );
+        }
+      }
+
       // 3. Persist embeddings into document_chunks
       await Promise.all(
         chunkBatch.map((chunk, idx) =>

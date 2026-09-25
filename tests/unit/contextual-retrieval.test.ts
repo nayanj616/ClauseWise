@@ -112,7 +112,7 @@ vi.mock("@/lib/db", () => {
 
 vi.mock("@/lib/embeddings/embeddings-client", () => {
   return {
-    embedText: vi.fn(async () => [0.1, 0.2, 0.3, 0.4]),
+    embedText: vi.fn(async () => Array(768).fill(0.1)),
   };
 });
 

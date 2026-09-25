@@ -101,7 +101,7 @@ vi.mock("@/lib/embeddings/embeddings-client", () => {
       if (shouldFailEmbedding) {
         throw new Error(embeddingErrorMessage);
       }
-      return Array(1536).fill(0.02);
+      return Array(768).fill(0.02);
     }),
   };
 });
