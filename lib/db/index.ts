@@ -8,31 +8,67 @@
  * same server process. In serverless environments each invocation creates
  * a fresh connection (acceptable for MVP scale).
  */
-import { drizzle } from "drizzle-orm/postgres-js";
+import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import * as schema from "./schema";
 
-// Fail-fast: if DATABASE_URL is missing the app cannot start safely.
-// The full env validation in lib/env.ts is the canonical check; this guard
-// catches cases where lib/db is imported before lib/env has been validated.
-if (!process.env.DATABASE_URL) {
-  throw new Error(
-    "[clausewise] DATABASE_URL environment variable is not set. " +
-      "Copy .env.example to .env.local and set a valid PostgreSQL URL."
-  );
+export type Db = PostgresJsDatabase<typeof schema>;
+
+const globalForDb = globalThis as unknown as {
+  _clausewiseQueryClient?: ReturnType<typeof postgres>;
+  _clausewiseDb?: Db;
+};
+
+function createDbInstance(): Db {
+  const connectionString = process.env.DATABASE_URL;
+  if (!connectionString || !connectionString.trim()) {
+    throw new Error(
+      "[clausewise] DATABASE_URL environment variable is not set. " +
+        "Configure a valid PostgreSQL connection string in your environment or .env.local."
+    );
+  }
+
+  const queryClient =
+    globalForDb._clausewiseQueryClient ??
+    postgres(connectionString, {
+      // Disable prepared statements for compatibility with Supabase Transaction Pooler (Supavisor / port 6543)
+      prepare: false,
+      // Keep pool bounded per serverless instance while supporting parallel queries within a request
+      max: process.env.NODE_ENV === "production" ? 5 : 10,
+      idle_timeout: 20,
+      connect_timeout: 10,
+    });
+
+  if (process.env.NODE_ENV !== "production") {
+    globalForDb._clausewiseQueryClient = queryClient;
+  }
+
+  return drizzle(queryClient, {
+    schema,
+    logger: process.env.NODE_ENV === "development",
+  });
 }
 
-const queryClient = postgres(process.env.DATABASE_URL, {
-  // Limit pool size to avoid overwhelming serverless DB connections
-  max: 10,
-  idle_timeout: 20,
-  connect_timeout: 10,
+export function getDb(): Db {
+  if (!globalForDb._clausewiseDb) {
+    globalForDb._clausewiseDb = createDbInstance();
+  }
+  return globalForDb._clausewiseDb;
+}
+
+/**
+ * Lazily initialized Drizzle database client.
+ * Prevents database connections from being opened at module-import time during `next build`.
+ */
+export const db: Db = new Proxy({} as Db, {
+  get(_target, prop, receiver) {
+    const instance = getDb();
+    const value = Reflect.get(instance, prop, receiver);
+    if (typeof value === "function") {
+      return value.bind(instance);
+    }
+    return value;
+  },
 });
 
-export const db = drizzle(queryClient, {
-  schema,
-  logger: process.env.NODE_ENV === "development",
-});
-
-export type Db = typeof db;
 

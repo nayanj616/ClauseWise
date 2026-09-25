@@ -25,6 +25,8 @@ import {
 } from "@/lib/services/qa-service";
 import { DocumentAccessError } from "@/lib/services/retrieval-service";
 
+export const maxDuration = 60;
+
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

@@ -10,7 +10,7 @@
  * Phase 1 will add upload/download/delete helpers on top of this client.
  * Do not implement document operations here in Phase 0.
  */
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { env } from "@/lib/env";
 
 /**
@@ -20,22 +20,45 @@ import { env } from "@/lib/env";
  */
 export const DOCUMENTS_BUCKET = "documents" as const;
 
+let _storageClientInstance: SupabaseClient | null = null;
+
+/**
+ * Lazily creates and returns the server-side Supabase client authenticated
+ * with the service role key. Avoids build-time initialization when modules
+ * are evaluated during `next build`.
+ */
+export function getStorageClient(): SupabaseClient {
+  if (!_storageClientInstance) {
+    _storageClientInstance = createClient(
+      env.SUPABASE_URL,
+      env.SUPABASE_SERVICE_ROLE_KEY,
+      {
+        auth: {
+          // Disable auto-refresh — this is a server-side client, not a user session
+          autoRefreshToken: false,
+          persistSession: false,
+        },
+      }
+    );
+  }
+  return _storageClientInstance;
+}
+
 /**
  * Supabase client authenticated with the service role key.
  * Bypasses Row Level Security — all access control is enforced
  * in our application layer (document ownership checks).
  */
-export const storageClient = createClient(
-  env.SUPABASE_URL,
-  env.SUPABASE_SERVICE_ROLE_KEY,
-  {
-    auth: {
-      // Disable auto-refresh — this is a server-side client, not a user session
-      autoRefreshToken: false,
-      persistSession: false,
-    },
-  }
-);
+export const storageClient: SupabaseClient = new Proxy({} as SupabaseClient, {
+  get(_target, prop, receiver) {
+    const client = getStorageClient();
+    const value = Reflect.get(client, prop, receiver);
+    if (typeof value === "function") {
+      return value.bind(client);
+    }
+    return value;
+  },
+});
 
 /**
  * Convenience accessor for the documents bucket.
@@ -43,7 +66,7 @@ export const storageClient = createClient(
  * constructing bucket references directly.
  */
 export function getDocumentsBucket() {
-  return storageClient.storage.from(DOCUMENTS_BUCKET);
+  return getStorageClient().storage.from(DOCUMENTS_BUCKET);
 }
 
 /**

@@ -9,6 +9,9 @@
  */
 import { z } from "zod";
 
+const emptyStringToUndefined = (v: unknown): unknown =>
+  typeof v === "string" && v.trim() === "" ? undefined : v;
+
 const envSchema = z.object({
   // Database
   DATABASE_URL: z
@@ -23,7 +26,10 @@ const envSchema = z.object({
   NEXTAUTH_SECRET: z
     .string()
     .min(32, "NEXTAUTH_SECRET must be at least 32 characters"),
-  NEXTAUTH_URL: z.string().url("NEXTAUTH_URL must be a valid URL").optional(),
+  NEXTAUTH_URL: z.preprocess(
+    emptyStringToUndefined,
+    z.string().url("NEXTAUTH_URL must be a valid URL").optional()
+  ),
 
   // Supabase Storage (server-side)
   SUPABASE_URL: z.string().url("SUPABASE_URL must be a valid URL"),
@@ -32,7 +38,12 @@ const envSchema = z.object({
     .min(1, "SUPABASE_SERVICE_ROLE_KEY is required"),
 
   // OpenAI (server-side only — never prefix with NEXT_PUBLIC_)
-  OPENAI_API_KEY: z.string().min(1, "OPENAI_API_KEY is required"),
+  // Optional at app startup/build time so a missing key does not block builds
+  // or non-AI routes; enforced in lib/ai/openai-client.ts when AI calls run.
+  OPENAI_API_KEY: z.preprocess(
+    emptyStringToUndefined,
+    z.string().min(1).optional()
+  ),
 
   // Node environment
   NODE_ENV: z
@@ -40,7 +51,11 @@ const envSchema = z.object({
     .default("development"),
 });
 
-function validateEnv(): z.infer<typeof envSchema> {
+export type Env = z.infer<typeof envSchema>;
+
+let _cachedEnv: Env | null = null;
+
+export function validateEnv(): Env {
   const result = envSchema.safeParse(process.env);
   if (!result.success) {
     const errors = result.error.flatten().fieldErrors;
@@ -49,11 +64,29 @@ function validateEnv(): z.infer<typeof envSchema> {
       .join("\n");
     throw new Error(
       `[clausewise] Invalid or missing environment variables:\n${formatted}\n` +
-        "Copy .env.example to .env.local and fill in all required values."
+        "Configure all required variables in your deployment environment or .env.local."
     );
   }
   return result.data;
 }
 
-export const env = validateEnv();
+export function getEnv(): Env {
+  if (!_cachedEnv) {
+    _cachedEnv = validateEnv();
+  }
+  return _cachedEnv;
+}
+
+/**
+ * Lazily validated environment object.
+ * Defers validation until a property is read at runtime so that module imports
+ * during `next build` do not fail when runtime secrets are not yet injected.
+ */
+export const env: Env = new Proxy({} as Env, {
+  get(_target, prop: string | symbol) {
+    const validated = getEnv();
+    return Reflect.get(validated, prop);
+  },
+});
+
 

@@ -34,6 +34,8 @@ import {
 } from "@/lib/services/conversation-service";
 import { answerConversationQuestionStream } from "@/lib/services/qa-service";
 
+export const maxDuration = 60;
+
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

@@ -17,6 +17,8 @@ import { auth } from "@/auth";
 import { uploadDocument } from "@/lib/services/document-service";
 import { DocumentValidationError } from "@/lib/validation/document-validation";
 
+export const maxDuration = 60;
+
 export async function POST(request: Request): Promise<NextResponse> {
   // 1. Authentication check
   const session = await auth();

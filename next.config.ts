@@ -1,5 +1,31 @@
 import type { NextConfig } from "next";
 
+function getServerActionAllowedOrigins(): string[] {
+  const origins = new Set<string>(["localhost:3000"]);
+
+  for (const rawUrl of [
+    process.env.NEXTAUTH_URL,
+    process.env.NEXT_PUBLIC_APP_URL,
+  ]) {
+    if (rawUrl) {
+      try {
+        origins.add(new URL(rawUrl).host);
+      } catch {
+        // Ignore malformed URLs
+      }
+    }
+  }
+
+  if (process.env.VERCEL_URL) {
+    origins.add(process.env.VERCEL_URL);
+  }
+  if (process.env.VERCEL_PROJECT_PRODUCTION_URL) {
+    origins.add(process.env.VERCEL_PROJECT_PRODUCTION_URL);
+  }
+
+  return Array.from(origins);
+}
+
 const nextConfig: NextConfig = {
   // Security headers applied to all routes
   async headers() {
@@ -36,7 +62,7 @@ const nextConfig: NextConfig = {
   // Explicitly allowlist what can be in the client bundle
   experimental: {
     serverActions: {
-      allowedOrigins: ["localhost:3000"],
+      allowedOrigins: getServerActionAllowedOrigins(),
     },
   },
 };

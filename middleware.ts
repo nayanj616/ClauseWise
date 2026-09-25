@@ -11,9 +11,12 @@
  * The middleware runs on the Edge and does NOT make DB calls — it reads
  * only the signed JWT cookie, which is a constant-time operation.
  */
-import { auth } from "@/auth";
+import NextAuth from "next-auth";
+import { authConfig } from "@/auth.config";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+
+const { auth } = NextAuth(authConfig);
 
 // Routes that authenticated users should not reach
 const AUTH_ROUTES = ["/sign-in", "/sign-up"];
