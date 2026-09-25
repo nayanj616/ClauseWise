@@ -7,8 +7,10 @@
 ## 1. Overview
 
 ClauseWise is a **Next.js App Router** full-stack application backed by
-**PostgreSQL + pgvector**, using **OpenAI** for language understanding and
-embeddings, and **Supabase Storage** for file storage.
+**PostgreSQL + pgvector**, supporting **local Ollama** (`qwen3:4b` and
+`nomic-embed-text`) as well as **OpenAI** (`gpt-4o` and
+`text-embedding-3-small`) for language understanding and embeddings, and
+**Supabase Storage** for private file storage.
 
 ---
 
@@ -23,7 +25,7 @@ embeddings, and **Supabase Storage** for file storage.
 | ORM | Drizzle ORM | Type-safe, lightweight, migration support |
 | Vector search | pgvector | Co-located with relational data, no extra service |
 | File storage | Supabase Storage | Managed, S3-compatible, integrates with Postgres auth |
-| LLM | OpenAI API | GPT-4o for analysis, chat; text-embedding-3-small for embeddings |
+| LLM & Embeddings | Ollama (`qwen3:4b`, `nomic-embed-text`) / OpenAI (`gpt-4o`, `text-embedding-3-small`) | Configurable local inference via `AI_PROVIDER=ollama` with OpenAI fallback preserved |
 | Authentication | NextAuth.js (Auth.js v5) | Server-side sessions, credentials provider for MVP |
 | Validation | Zod | Runtime schema validation on all API boundaries |
 | Unit tests | Vitest | Fast, TypeScript-native |
@@ -70,8 +72,8 @@ embeddings, and **Supabase Storage** for file storage.
 │        Infrastructure Layer              │
 │  lib/db/         — Drizzle + PostgreSQL  │
 │  lib/storage/    — Supabase Storage      │
-│  lib/ai/         — OpenAI client adapter │
-│  lib/embeddings/ — OpenAI embeddings     │
+│  lib/ai/         — Ollama & OpenAI       │
+│  lib/embeddings/ — 768d / 1536d adapters │
 │  lib/vector/     — pgvector queries      │
 └──────────────────────────────────────────┘
 ```

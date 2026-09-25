@@ -45,6 +45,28 @@ const envSchema = z.object({
     z.string().min(1).optional()
   ),
 
+  // AI Provider & Local Ollama Configuration (server-side only)
+  AI_PROVIDER: z.preprocess(
+    emptyStringToUndefined,
+    z.enum(["openai", "ollama"]).optional()
+  ),
+  EMBEDDING_PROVIDER: z.preprocess(
+    emptyStringToUndefined,
+    z.enum(["openai", "ollama"]).optional()
+  ),
+  OLLAMA_BASE_URL: z.preprocess(
+    emptyStringToUndefined,
+    z.string().url("OLLAMA_BASE_URL must be a valid URL").optional()
+  ),
+  OLLAMA_CHAT_MODEL: z.preprocess(
+    emptyStringToUndefined,
+    z.string().min(1).optional()
+  ),
+  OLLAMA_EMBEDDING_MODEL: z.preprocess(
+    emptyStringToUndefined,
+    z.string().min(1).optional()
+  ),
+
   // Node environment
   NODE_ENV: z
     .enum(["development", "test", "production"])

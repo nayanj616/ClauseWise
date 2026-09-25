@@ -13,10 +13,16 @@ import { test, expect } from "@playwright/test";
  */
 
 test.describe("Unauthenticated access", () => {
-  test("visiting / redirects to /dashboard then to /sign-in", async ({ page }) => {
+  test("visiting / renders the public landing page without authentication", async ({ page }) => {
     await page.goto("/");
-    // Should end up on /sign-in (/ → /dashboard → /sign-in via middleware)
-    await expect(page).toHaveURL(/\/sign-in/);
+    await expect(page).toHaveURL(/\/$/);
+    await expect(page.getByTestId("landing-page")).toBeVisible();
+    await expect(
+      page.getByRole("heading", {
+        name: /Navigate complex legal documents in plain English/i,
+      })
+    ).toBeVisible();
+    await expect(page.getByTestId("landing-legal-disclaimer")).toBeVisible();
   });
 
   test("visiting /dashboard directly redirects to /sign-in", async ({ page }) => {

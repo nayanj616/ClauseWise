@@ -743,44 +743,91 @@ export async function* answerConversationQuestionStream(
   let lastEmittedLength = 0;
 
   try {
-    const { getOpenAiClient, MODELS, TEMPERATURES } = await import(
-      "@/lib/ai/openai-client"
-    );
-    const { zodResponseFormat } = await import("openai/helpers/zod");
-    const client = getOpenAiClient();
+    const openaiModule = await import("@/lib/ai/openai-client");
+    let activeProvider: "openai" | "ollama" = "openai";
+    try {
+      if (
+        "getActiveAiProvider" in openaiModule &&
+        typeof openaiModule.getActiveAiProvider === "function"
+      ) {
+        activeProvider = openaiModule.getActiveAiProvider();
+      }
+    } catch {
+      activeProvider = "openai";
+    }
 
-    const stream = await client.chat.completions.create(
-      {
-        model: MODELS.CHAT,
-        temperature: TEMPERATURES.QA,
+    if (activeProvider === "ollama") {
+      const { streamOllamaStructuredChat } = await import(
+        "@/lib/ai/ollama-client"
+      );
+      const ollamaStream = streamOllamaStructuredChat({
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt },
         ],
-        response_format: zodResponseFormat(ModelQaOutputSchema, "grounded_qa_answer"),
-        stream: true,
-      },
-      {
+        schema: ModelQaOutputSchema,
+        name: "grounded_qa_answer",
+        temperature: openaiModule.TEMPERATURES.QA,
         signal,
-      }
-    );
+      });
 
-    for await (const chunk of stream) {
-      if (signal?.aborted) {
-        // Interrupted stream: do NOT persist assistant message!
-        return;
+      for await (const text of ollamaStream) {
+        if (signal?.aborted) {
+          return;
+        }
+        if (text) {
+          fullJsonBuffer += text;
+          const { delta, newEmittedIndex } = extractAnswerDelta(
+            fullJsonBuffer,
+            lastEmittedLength
+          );
+          if (delta) {
+            lastEmittedLength = newEmittedIndex;
+            yield { type: "delta", delta };
+          }
+        }
       }
+    } else {
+      const { getOpenAiClient, MODELS, TEMPERATURES } = openaiModule;
+      const { zodResponseFormat } = await import("openai/helpers/zod");
+      const client = getOpenAiClient();
 
-      const text = chunk.choices[0]?.delta?.content || "";
-      if (text) {
-        fullJsonBuffer += text;
-        const { delta, newEmittedIndex } = extractAnswerDelta(
-          fullJsonBuffer,
-          lastEmittedLength
-        );
-        if (delta) {
-          lastEmittedLength = newEmittedIndex;
-          yield { type: "delta", delta };
+      const stream = await client.chat.completions.create(
+        {
+          model: MODELS.CHAT,
+          temperature: TEMPERATURES.QA,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
+          ],
+          response_format: zodResponseFormat(
+            ModelQaOutputSchema,
+            "grounded_qa_answer"
+          ),
+          stream: true,
+        },
+        {
+          signal,
+        }
+      );
+
+      for await (const chunk of stream) {
+        if (signal?.aborted) {
+          // Interrupted stream: do NOT persist assistant message!
+          return;
+        }
+
+        const text = chunk.choices[0]?.delta?.content || "";
+        if (text) {
+          fullJsonBuffer += text;
+          const { delta, newEmittedIndex } = extractAnswerDelta(
+            fullJsonBuffer,
+            lastEmittedLength
+          );
+          if (delta) {
+            lastEmittedLength = newEmittedIndex;
+            yield { type: "delta", delta };
+          }
         }
       }
     }
@@ -798,7 +845,13 @@ export async function* answerConversationQuestionStream(
   // 6. Accumulate and parse final structured model output
   let parsed: ModelQaOutput;
   try {
-    const rawJson = JSON.parse(fullJsonBuffer);
+    let cleanedBuffer = fullJsonBuffer.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+    const firstBrace = cleanedBuffer.indexOf("{");
+    const lastBrace = cleanedBuffer.lastIndexOf("}");
+    if (firstBrace !== -1 && lastBrace > firstBrace) {
+      cleanedBuffer = cleanedBuffer.slice(firstBrace, lastBrace + 1);
+    }
+    const rawJson = JSON.parse(cleanedBuffer || fullJsonBuffer);
     parsed = ModelQaOutputSchema.parse(rawJson);
   } catch (error) {
     yield {

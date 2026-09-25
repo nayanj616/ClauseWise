@@ -394,9 +394,43 @@ export interface StructuredOutputOptions<T> {
   retryDelayMs?: number;
 }
 
+export type AiProvider = "openai" | "ollama";
+
+/**
+ * Determines the active AI generation provider.
+ * - Honors injected OpenAI test client when present (`_clientInstance !== null`).
+ * - Honors explicit `AI_PROVIDER` ("ollama" | "openai").
+ * - Falls back to "ollama" if `OPENAI_API_KEY` is unset and `OLLAMA_BASE_URL` is configured.
+ * - Defaults to "openai" to preserve existing fallback behavior.
+ */
+export function getActiveAiProvider(): AiProvider {
+  if (_clientInstance !== null) {
+    return "openai";
+  }
+
+  const explicit = (process.env.AI_PROVIDER || "").trim().toLowerCase();
+  if (explicit === "ollama") return "ollama";
+  if (explicit === "openai") return "openai";
+
+  let apiKey: string | undefined;
+  try {
+    apiKey = env.OPENAI_API_KEY;
+  } catch {
+    apiKey = process.env.OPENAI_API_KEY;
+  }
+
+  if ((!apiKey || !apiKey.trim()) && process.env.OLLAMA_BASE_URL) {
+    return "ollama";
+  }
+
+  return "openai";
+}
+
 /**
  * Generic, production-ready structured output executor with deterministic timeout,
  * bounded retries for transient failures, and safe telemetry.
+ * Routes to local Ollama (`qwen3:4b`) when `getActiveAiProvider() === "ollama"`,
+ * while preserving OpenAI (`gpt-4o`) as the fallback provider.
  *
  * @param options - Request options including messages, Zod schema, and execution limits
  * @returns Parsed and validated object conforming to the provided Zod schema
@@ -415,6 +449,13 @@ export async function generateStructuredOutput<T>(
     throw new OpenAiInvalidRequestError(
       "Structured output request requires schema and schema name."
     );
+  }
+
+  if (getActiveAiProvider() === "ollama") {
+    const { generateOllamaStructuredOutput } = await import(
+      "@/lib/ai/ollama-client"
+    );
+    return generateOllamaStructuredOutput(options);
   }
 
   const client = getOpenAiClient();
