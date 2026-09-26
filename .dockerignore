@@ -1,0 +1,34 @@
+# Dependencies & build output
+node_modules
+.next
+out
+dist
+build
+
+# Environment & secret files (never bake secrets into Docker images)
+.env
+.env.*
+!.env.example
+
+# Testing, coverage & local verification artifacts
+coverage
+playwright-report
+test-results
+*.log
+*.bak
+*.sql.bak
+*backup*.json
+
+# Version control & editor metadata
+.git
+.gitignore
+.vscode
+.idea
+
+# Documentation & local scratch
+docs
+README.md
+AGENTS.md
+Dockerfile
+docker-compose.yml
+Caddyfile
