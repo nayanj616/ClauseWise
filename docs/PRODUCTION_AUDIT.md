@@ -169,3 +169,145 @@ Following explicit approval, `lib/db/migrations/0009_great_vision.sql` and 52-ch
 | **Ollama `qwen3:4b` & `nomic-embed-text` (`768d`)** | **Verified Live Locally** — Connected to `http://localhost:11434`; verified live classification, `768d` embedding generation, streaming, and grounded Q&A. | **Not Reachable at `localhost:11434` on Vercel** — Serverless functions cannot reach a developer's local `localhost:11434`. Deployed environments require either a privately networked/tunneled GPU Ollama host (`OLLAMA_BASE_URL=https://...`) or self-hosting the Next.js container alongside Ollama. |
 | **OpenAI Text-Generation Fallback (`gpt-4o`)** | **Code Path Verified / Key Invalid** — Adapter routing and citation validation verified; however, the `OPENAI_API_KEY` in `.env.local` returns HTTP `401`. | **Requires Valid API Key** — Can be used for text generation (`AI_PROVIDER=openai`) in Vercel if a valid `OPENAI_API_KEY` is provisioned, **provided** embeddings still resolve via a reachable `nomic-embed-text` (`768d`) endpoint. |
 | **Existing Remote Document Row Statuses** | **Observed State** — Both existing rows in `public.document` (`030819fa-...`, `6143029b-...`) still have `status: "error"` and `0` rows in `findings` from pre-migration upload failures (preserved untouched per non-destructive rules). | **Operational Note** — Uploading a new document (or re-running intelligence persistence with approval) is required to populate `findings` and transition document status to `"ready"`. |
+
+---
+
+## 9. Phase 5 — Deployment Readiness & Release Verification Plan
+
+### 9.1 Decision 1: Production Hosting Architecture (Next.js + Ollama)
+
+Because `public.document_chunks.embedding` uses `vector(768)` (`nomic-embed-text`) and local `qwen3:4b` inference takes ~6–25 seconds per structured call on local hardware, the deployment topology must satisfy both **network reachability** and **request duration limits**:
+
+| Architecture Option | Topology | Pros | Constraints & Risks |
+|---|---|---|---|
+| **Option A (Recommended for Self-Hosted / Local-First Release)** | **Co-located Next.js + Ollama** (`next start` or Docker Compose on a single GPU/CPU host, optionally exposed via HTTPS reverse proxy / Cloudflare Tunnel). | Zero network latency to `http://localhost:11434`; no serverless function timeout limits during synchronous upload + multi-section analysis; zero cloud LLM API cost. | Requires host machine with $\ge$ 8 GB RAM and `qwen3:4b` (`2.5 GB`) + `nomic-embed-text` (`274 MB`) installed. |
+| **Option B (Hybrid Cloud: Vercel + Remote Ollama Host)** | **Next.js on Vercel** + **Dedicated Ollama Server** (`OLLAMA_BASE_URL=https://...` via private tunnel or GPU VM). | Managed Next.js hosting on Vercel CDN/edge while keeping open-weights inference and `768d` embeddings. | **Timeout constraint**: Synchronous `uploadDocument(..., processExtraction: true)` runs extraction + `768d` embeddings + `qwen3:4b` intelligence in a single request (~30–90s), which can exceed Vercel Hobby (10s–60s) function limits unless GPU-accelerated. |
+| **Option C (Hybrid Cloud: Vercel + OpenAI Chat + Remote `nomic-embed-text`)** | **Next.js on Vercel** (`AI_PROVIDER="openai"` with valid `OPENAI_API_KEY`) + reachable `nomic-embed-text` endpoint (`EMBEDDING_PROVIDER="ollama"`). | Fast cloud `gpt-4o` structured generation inside Vercel function timeouts while preserving `vector(768)` compatibility. | Requires provisioning a valid paid `OPENAI_API_KEY` and still requires a reachable `nomic-embed-text` endpoint for `768d` query/chunk embeddings. |
+
+---
+
+### 9.2 Decision 2: OpenAI Fallback Resolution
+
+The `OPENAI_API_KEY` currently stored in `.env.local` returns `OpenAiAuthError (401): OpenAI authentication failed: invalid API key or credentials`. Two clean paths exist:
+
+1. **Explicitly Disable OpenAI Fallback (Recommended for Pure Ollama Setup)**:
+   - Remove or leave `OPENAI_API_KEY` empty in `.env.local` and production environment variables (allowed by `lib/env.ts` line 43 where `OPENAI_API_KEY` is optional).
+   - Keep `AI_PROVIDER="ollama"` and `EMBEDDING_PROVIDER="ollama"` explicitly pinned so runtime calls never attempt OpenAI authentication.
+2. **Enable OpenAI Text-Generation Fallback**:
+   - Provision a valid `OPENAI_API_KEY` in `.env.local` / production secrets and verify a live `200 OK` structured completion before enabling `AI_PROVIDER="openai"`.
+   - Keep `EMBEDDING_PROVIDER="ollama"` pinned so `1536d` OpenAI embeddings remain blocked while `vector(768)` is active.
+
+---
+
+### 9.3 Decision 3: Handling the Two Existing Error-State Documents
+
+Both existing documents (`030819fa-d926-4d2f-bae2-1be3ed69a85c` and `6143029b-dbfb-4889-8421-7fcdc39c6106`, `New_York_Services_Agreement.pdf`) already have:
+- `26` extracted sections (`document_sections`) intact per document (`52` total),
+- `26` chunks (`document_chunks`) with verified `768d` `nomic-embed-text` embeddings per document (`52` total),
+- `status: "error"` (`error_message: "Failed to generate and persist embeddings for document chunks: ..."`) and `0` rows in `document_findings` from pre-migration upload attempts.
+
+**Available Options (Pending Approval)**:
+- **Option A — Reprocess Existing Documents via `processDocumentIntelligence(docId)`**:
+  - Because all `52` chunks already have `768d` embeddings, Step 2 (`generateAndPersistChunkEmbeddings`) is a no-op (`0` writes), Step 3 (`analyzeDocumentIntelligence`) runs `qwen3:4b` against the existing sections/chunks without modifying them, and Step 4 (`persistDocumentIntelligence`) atomically inserts validated findings into `document_findings` and updates `document.status` from `"error"` to `"ready"`.
+- **Option B — Leave Existing Documents Untouched & Validate via Fresh Upload**:
+  - Keep both error-state documents unchanged as historical records and run a new end-to-end upload test (`uploadDocument` with `processExtraction: true`).
+- **Option C — Execute Both**:
+  - Reprocess the two existing documents to `"ready"` and validate a fresh document upload.
+
+---
+
+### 9.4 Production Environment Checklist
+
+Before any production release or live verification, verify the following environment variables and infrastructure checks:
+
+| Variable / Resource | Required Value / Format | Security & Runtime Requirement |
+|---|---|---|
+| `NODE_ENV` | `"production"` | Enables production Next.js optimizations and secure cookie handling. |
+| `DATABASE_URL` | `postgresql://...` | Must point to the PostgreSQL instance with `pgvector` installed and `document_chunks.embedding` set to `vector(768)`. |
+| `NEXTAUTH_SECRET` | High-entropy secret ($\ge$ 32 chars) | Used to sign/encrypt NextAuth v5 JWT session cookies. Never expose to client. |
+| `NEXTAUTH_URL` | Canonical HTTPS origin (e.g., `https://...` or `http://localhost:3000`) | Must match the public origin serving the Next.js app. |
+| `SUPABASE_URL` | `https://<project-ref>.supabase.co` | Server-side Supabase project URL. |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role JWT | Server-side only; required for private `documents` bucket read/write. |
+| `AI_PROVIDER` | `"ollama"` (or `"openai"` if valid key provisioned) | Explicitly pins the text-generation provider. |
+| `EMBEDDING_PROVIDER` | `"ollama"` | **Must remain `"ollama"`** (`768d`) while `document_chunks.embedding` is `vector(768)`. |
+| `OLLAMA_BASE_URL` | `http://localhost:11434` (co-located) or `https://...` (remote) | Must be reachable from the Next.js server runtime. |
+| `OLLAMA_CHAT_MODEL` | `"qwen3:4b"` | Must be pre-pulled (`ollama pull qwen3:4b`) on the Ollama host. |
+| `OLLAMA_EMBEDDING_MODEL` | `"nomic-embed-text"` | Must be pre-pulled (`ollama pull nomic-embed-text`) on the Ollama host. |
+| `OPENAI_API_KEY` | Omit/empty (if disabled) or valid `sk-...` key | Remove invalid key so no accidental `401` fallback occurs. |
+
+---
+
+### 9.5 Rollback Plan
+
+1. **Application / Configuration Rollback**:
+   - Environment variable changes in `.env.local` or deployment settings can be reverted immediately without database changes.
+   - If a deployment build fails health checks, roll back to the previous deployment revision or stop the local `next start` process.
+2. **Database & Document State Rollback**:
+   - The verified pre-migration snapshot (`remote_db_backup_20260925.json`, SHA-256 `6d66977d7617003cdabf8ef09cb7922ebe907160feed8e1f4e84886df465df5f`) preserves the exact state of `users`, `document`, `document_sections`, and `document_chunks`.
+   - If reprocessing `processDocumentIntelligence()` on an existing document is approved and encounters any failure, `persistDocumentIntelligence()` runs inside a single PostgreSQL transaction (`db.transaction`) that automatically rolls back partial finding writes and leaves `document_sections` and `document_chunks` 100% untouched.
+
+---
+
+### 9.6 Phase 5 Executed Decisions & Final Release Validation Results
+
+1. **Approved Decisions Applied**:
+   - **Hosting Architecture**: Selected **Option A (Co-located Next.js + Local Ollama)** (`http://localhost:11434` with `qwen3:4b` and `nomic-embed-text:latest`).
+   - **OpenAI Fallback**: Explicitly disabled the invalid `OPENAI_API_KEY` in `.env.local` and `.env.example` (`openAiKeyExplicitlyDisabled: true`), pinning `AI_PROVIDER="ollama"`, `EMBEDDING_PROVIDER="ollama"`, and `OLLAMA_TIMEOUT_MS="180000"`.
+   - **Existing Error-State Documents**: Preserved `030819fa-d926-4d2f-bae2-1be3ed69a85c` and `6143029b-dbfb-4889-8421-7fcdc39c6106` untouched (`originalErrorDocsUntouched: true`) and validated the full pipeline using a fresh PDF upload.
+2. **CPU-Bound Ollama GBNF Optimization (`lib/ai/ollama-client.ts`)**:
+   - Stripped `minLength`/`maxLength`/`minItems`/`maxItems` from the GBNF `format` schema in `buildOllamaJsonSchema()` (while retaining full Zod validation via `options.schema.safeParse`), constrained `documentType` to `SUPPORTED_DOCUMENT_TYPES`, simplified nullable `metadata` in GBNF, and set the default local Ollama timeout to `180000 ms` (`3` minutes) to accommodate CPU inference (`size_vram: 0`).
+3. **End-to-End Fresh Document Upload & Intelligence Verification (`Mutual_NDA_Release_Validation.pdf`)**:
+   - Executed `uploadDocument({ userId, file, processExtraction: true })` end-to-end against private Supabase Storage, remote Supabase PostgreSQL (`pgvector 0.8.2`), and local Ollama (`nomic-embed-text` + `qwen3:4b`):
+     - **Document ID**: `0638cf24-0977-4639-8a78-6b145c59428e`
+     - **Final Status**: `"ready"` (`errorMessage: null`, total duration `111,077 ms` on CPU)
+     - **Classification & Parties**: `documentType: "nda"`, `partiesCount: 2`, `pageCount: 2`
+     - **Extracted Sections & `768d` Embeddings**: `sectionsCount: 5`, `total_chunks: 5`, `embedded_chunks: 5`, `min_dims: 768`, `max_dims: 768`
+     - **Persisted Verified Findings**: `2` findings persisted in `public.document_findings` (`key_term`: *"Confidential Information"*, Page 1; `obligation`: *"Confidentiality Obligations"*, Page 1; both with `hasVerifiedSourceText: true`).
+     - **Live Grounded Q&A on New Document**: `answerQuestion()` returned `hasSufficientEvidence: true`, `isGrounded: true`, `citationValidationPassed: true`, `citationsCount: 1` (*"The governing law for this NDA is the laws of the State of New York, as specified in Section 4..."*).
+4. **Final Build, Type-Check & Unit Test Gate**:
+   - `npx tsc --noEmit`: Passed (`0` errors).
+   - `npx vitest run tests/unit`: Passed all `52` test files (`817` tests in `13.48s`).
+   - `npx next build`: Passed production build compilation (`14/14` static pages and all dynamic routes).
+
+---
+
+## 10. Controlled Production-Server Startup & HTTP Smoke-Test Report
+
+### 10.1 Production Server Startup & Provider Pinning
+
+- **Server Process**: Started Next.js 15.0.8 in production mode (`npx next start -p 3000`) co-located with local Ollama on `http://localhost:3000` (`Ready in 2s`).
+- **Active Providers**:
+  - `AI_PROVIDER="ollama"` (`OLLAMA_CHAT_MODEL="qwen3:4b"`, `OLLAMA_TIMEOUT_MS="180000"`)
+  - `EMBEDDING_PROVIDER="ollama"` (`OLLAMA_EMBEDDING_MODEL="nomic-embed-text"`, `768` dimensions)
+  - `OPENAI_API_KEY` remains explicitly disabled (`openAiKeyExplicitlyDisabled: true`).
+- **Preserved Database & Storage State**:
+  - **Original Error-State Documents**: `030819fa-d926-4d2f-bae2-1be3ed69a85c` and `6143029b-dbfb-4889-8421-7fcdc39c6106` remain untouched (`status: "error"`, `originalErrorDocsPreserved: true`).
+  - **Smoke-Test NDA Documents Retained for Audit Evidence**: `0638cf24-0977-4639-8a78-6b145c59428e` (`Mutual_NDA_Release_Validation.pdf`, `status: "ready"`) and `de296f90-7f6c-4be1-ba7f-477d4356733e` (`Production_Server_Smoke_Test_NDA.pdf`, `status: "ready"`) remain intact in database and storage pending user decision on cleanup.
+
+---
+
+### 10.2 Pre-Release Security & Infrastructure Verification
+
+| Condition | Verification Method | Result |
+|---|---|---|
+| **1. Protect Ollama Endpoint (`11434`)** | Inspected TCP listener table via `Get-NetTCPConnection -LocalPort 11434 -State Listen` | **PASS** — Bound strictly to `127.0.0.1:11434` (loopback only). Not listening on `0.0.0.0` or any external network interface. |
+| **2. Server-Side Secret Isolation** | Scanned all `51` compiled client `.js` bundles under `.next/static` for secret values and sensitive env identifiers (`DATABASE_URL`, `NEXTAUTH_SECRET`, `SUPABASE_SERVICE_ROLE_KEY`, `localhost:11434`) | **PASS** — `leakedSecretsFound: 0`. Only `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and `NEXT_PUBLIC_APP_URL` use the `NEXT_PUBLIC_` prefix. |
+| **3. Host Capacity & Concurrency Under CPU Load** | Sampled host CPU/RAM and fired concurrent HTTP requests (`GET /` and `GET /api/auth/session`) while `POST /api/documents/upload` ran CPU-bound `qwen3:4b` inference | **PASS** — Host has `12` logical cores and `15.69 GB` RAM (`6.92 GB` free during active inference). Concurrent `GET /` returned `200 OK` in **`21 ms`** and `GET /api/auth/session` returned `200 OK` in **`24 ms`** while upload inference was active (`nonBlockingUnderInferenceLoad: true`). |
+| **4. Production HTTP Auth & Cross-User Isolation** | Exercised `http://localhost:3000` with unauthenticated requests, owner JWE session cookies, and non-owner JWE session cookies | **PASS** — `GET /` $\rightarrow$ `200 OK`; `GET /sign-in` $\rightarrow$ `200 OK`; unauthenticated `GET /dashboard` $\rightarrow$ `307` redirect to `/sign-in`; unauthenticated `POST /api/documents/upload` $\rightarrow$ `401`; authenticated owner `GET /dashboard` $\rightarrow$ `200 OK`; cross-user `POST /api/documents/:id/ask` $\rightarrow$ `404` (`"Document not found or access denied"`). |
+
+---
+
+### 10.3 Live HTTP Production Smoke-Test Results (`http://localhost:3000`)
+
+1. **HTTP Document Upload, Extraction, `768d` Embeddings, & Findings (`POST /api/documents/upload`)**:
+   - **File Uploaded**: `Production_Server_Smoke_Test_NDA.pdf` (`2` pages)
+   - **HTTP Status & Latency**: `201 Created` in `103,149 ms` (`~103.1s` on CPU)
+   - **Document ID**: `de296f90-7f6c-4be1-ba7f-477d4356733e`
+   - **Final Status**: `"ready"` (`documentType: "nda"`, `pageCount: 2`, `errorMessage: null`)
+   - **Persisted Embeddings**: `5/5` chunks stored with `vector_dims(embedding) = 768` (`min_dims: 768`, `max_dims: 768`)
+   - **Persisted Findings**: `2` verified findings stored in `public.document_findings`
+2. **HTTP Grounded Q&A (`POST /api/documents/de296f90-7f6c-4be1-ba7f-477d4356733e/ask`)**:
+   - **Question**: `"What is the governing law of this agreement?"`
+   - **HTTP Status & Latency**: `200 OK` in `33,938 ms` (`~33.9s` on CPU)
+   - **Validation Flags**: `hasSufficientEvidence: true`, `isGrounded: true`, `citationValidationPassed: true`, `citationsCount: 1`
+   - **Grounded Answer**: *"The governing law of this agreement is the laws of the State of New York, as specified in Section 4 of the agreement."*
