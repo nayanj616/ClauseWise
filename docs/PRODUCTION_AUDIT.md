@@ -1,21 +1,37 @@
 # ClauseWise — Production Audit
 
-## 1. Confirmed Issues, Potential Risks, and Unknowns
+> **Executive Status Summary (Attempt 2 Baseline)**
+>
+> - **Implemented & Locally Verified (Audit Phases 1–5 + Section 10)**:
+>   - **Public Landing Page**: Implemented at `app/page.tsx` with `EVIDENCE → MEANING → ACTION` positioning and `/sign-in`, `/sign-up`, and `/dashboard` navigation.
+>   - **Local Ollama AI & `768d` Embeddings**: Implemented in `lib/ai/ollama-client.ts` (`qwen3:4b`) and `lib/embeddings/embeddings-client.ts` (`nomic-embed-text`, `768` dimensions), with PostgreSQL `pgvector` migrated in `drizzle/0009_great_vision.sql` to `vector(768)` (retaining OpenAI `gpt-4o` as an optional text-generation adapter).
+>   - **End-to-End NDA Workflow & Page 2 Governing Law Citation**: Verified against live PostgreSQL (`pgvector`), Supabase Storage, and local Ollama using 2-page NDAs (`Mutual_NDA_Release_Validation.pdf` and `Production_Server_Smoke_Test_NDA.pdf`), including grounded Q&A (`"What is the governing law of this agreement?"`) returning a verified citation to **Section 4 (`Governing Law`) on Page 2**.
+>   - **Container & Edge Proxy Configuration**: Implemented `Dockerfile`, `docker-compose.yml`, `Caddyfile`, and `tests/unit/deployment-config.test.ts` (`53` unit test files / `824` unit tests; `9` Playwright E2E spec files).
+> - **Pending / Unverified Production Work (Section 11.4)**:
+>   - **Remote Linux / GPU VM Provisioning (`Unverified`)**: External VM provisioning, public DNS/TLS (`APP_DOMAIN`), and live remote `docker compose up -d --build` smoke testing remain pending explicit deployment approval.
+>   - **Working-Tree `.dockerignore` Note**: Before running a production Docker build, ensure `.dockerignore` has all required exclusion rules intact as enforced by `tests/unit/deployment-config.test.ts`.
+>   - **Asynchronous Ingestion Queue & Application-Level `429` Rate Limiting (`Planned`)**: Document upload processing currently runs synchronously inside `POST /api/documents/upload`; moving ingestion to a background worker queue with `GET /api/documents/[id]/status` polling and per-user `429` sliding-window rate limiters is planned for multi-user production scale.
 
-### Confirmed Issues
-- **Missing Landing Page**: The root route (`/`) currently redirects directly to `/dashboard`. There is no public landing page explaining features or linking to authentication.
-- **Ollama Integration Pending**: The codebase currently relies on OpenAI APIs (`gpt-4o` and `text-embedding-3-small`) rather than the intended local Ollama models (`qwen3:4b` and `nomic-embed-text`).
-- **Embedding Dimensions Mismatch**: The current database schema for `document_chunks.embedding` specifies `vector(1536)` for OpenAI, whereas `nomic-embed-text` produces 768 dimensions.
+---
+
+## 1. Initial Audit Findings (Pre-Remediation Snapshot)
+
+*(Note: The issues below represent the initial pre-remediation audit baseline and were subsequently resolved in Audit Phases 1–5 documented below.)*
+
+### Confirmed Issues (Resolved in Audit Phases 1–5)
+- **Missing Landing Page** *(Resolved in Phase 2 — `app/page.tsx`)*: The root route (`/`) previously redirected directly to `/dashboard`.
+- **Ollama Integration Pending** *(Resolved in Phase 3 — `lib/ai/ollama-client.ts`)*: The codebase previously relied solely on OpenAI APIs (`gpt-4o` and `text-embedding-3-small`) rather than the local Ollama models (`qwen3:4b` and `nomic-embed-text`).
+- **Embedding Dimensions Mismatch** *(Resolved in Phase 4 — `drizzle/0009_great_vision.sql`)*: The database schema for `document_chunks.embedding` previously specified `vector(1536)` before being migrated to `vector(768)` for `nomic-embed-text`.
 
 ### Potential Risks
-- **Data Migration for Embeddings**: Changing the vector dimensions from 1536 to 768 will require a database migration that will invalidate any existing document embeddings if there are documents currently stored.
-- **AI Response Quality**: Transitioning from `gpt-4o` to a smaller 4B local model (`qwen3:4b`) may require substantial prompt tuning or extraction pipeline adjustments to maintain accuracy and structured JSON output capability.
-- **OpenAI Remnants**: Fully removing OpenAI dependencies might break some `gpt-4o` specific structural output parsing code if the local Ollama provider does not support the same structured output options out of the box.
+- **Data Migration for Embeddings**: Changing the vector dimensions from 1536 to 768 required a database migration (`0009_great_vision.sql`) and re-uploading/re-embedding active documents.
+- **AI Response Quality**: Transitioning from `gpt-4o` to a smaller 4B local model (`qwen3:4b`) required GBNF schema tuning and deterministic post-generation verification (`lib/ai/ollama-client.ts`, `lib/services/intelligence-service.ts`).
+- **OpenAI Remnants**: OpenAI (`gpt-4o`) is retained as an optional text-generation provider behind `AI_PROVIDER="openai"`, while `AI_PROVIDER="ollama"` and `EMBEDDING_PROVIDER="ollama"` are the active defaults.
 
-### Unknowns
-- Are there existing users and documents in the production database that we need to preserve, and if so, how do we handle re-embedding existing documents?
-- Is the production PostgreSQL instance properly configured with `pgvector` supporting 768 dimensions?
-- Is Ollama properly hosted and accessible from the production environment?
+### Historical Unknowns (Resolved in Phase 1 & Phase 4)
+- Were there existing users and documents in the database to preserve? *(Resolved: Preserved existing records and validated with fresh 2-page NDA uploads.)*
+- Was the PostgreSQL instance configured with `pgvector` supporting 768 dimensions? *(Resolved: Verified `pgvector 0.8.2` with `vector(768)` in Section 9.1.)*
+- Was Ollama hosted and accessible from the runtime environment? *(Resolved: Verified co-located local Ollama on `127.0.0.1:11434` and defined private container orchestration in `docker-compose.yml`.)*
 
 ## 2. Infrastructure Identification
 
@@ -263,10 +279,10 @@ Before any production release or live verification, verify the following environ
      - **Classification & Parties**: `documentType: "nda"`, `partiesCount: 2`, `pageCount: 2`
      - **Extracted Sections & `768d` Embeddings**: `sectionsCount: 5`, `total_chunks: 5`, `embedded_chunks: 5`, `min_dims: 768`, `max_dims: 768`
      - **Persisted Verified Findings**: `2` findings persisted in `public.document_findings` (`key_term`: *"Confidential Information"*, Page 1; `obligation`: *"Confidentiality Obligations"*, Page 1; both with `hasVerifiedSourceText: true`).
-     - **Live Grounded Q&A on New Document**: `answerQuestion()` returned `hasSufficientEvidence: true`, `isGrounded: true`, `citationValidationPassed: true`, `citationsCount: 1` (*"The governing law for this NDA is the laws of the State of New York, as specified in Section 4..."*).
+     - **Live Grounded Q&A on New Document**: `answerQuestion()` returned `hasSufficientEvidence: true`, `isGrounded: true`, `citationValidationPassed: true`, `citationsCount: 1` (*"The governing law for this NDA is the laws of the State of New York, as specified in Section 4..."*, with a verified supporting citation to **Section 4 (`Governing Law`) on Page 2**).
 4. **Final Build, Type-Check & Unit Test Gate**:
    - `npx tsc --noEmit`: Passed (`0` errors).
-   - `npx vitest run tests/unit`: Passed all `52` test files (`817` tests in `13.48s`).
+   - `npx vitest run tests/unit`: Passed all `52` test files (`817` tests in `13.48s`; subsequently `53` test files / `824` tests after adding `deployment-config.test.ts`).
    - `npx next build`: Passed production build compilation (`14/14` static pages and all dynamic routes).
 
 ---
@@ -310,7 +326,7 @@ Before any production release or live verification, verify the following environ
    - **Question**: `"What is the governing law of this agreement?"`
    - **HTTP Status & Latency**: `200 OK` in `33,938 ms` (`~33.9s` on CPU)
    - **Validation Flags**: `hasSufficientEvidence: true`, `isGrounded: true`, `citationValidationPassed: true`, `citationsCount: 1`
-   - **Grounded Answer**: *"The governing law of this agreement is the laws of the State of New York, as specified in Section 4 of the agreement."*
+   - **Grounded Answer & Page 2 Citation**: *"The governing law of this agreement is the laws of the State of New York, as specified in Section 4 of the agreement."* (supported by a verified citation to **Section 4 — Governing Law, Page 2**).
 
 ---
 

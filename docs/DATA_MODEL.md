@@ -1,139 +1,156 @@
-# ClauseWise — Conceptual Data Model
+# ClauseWise — Conceptual & Implemented Data Model
 
-**Version:** 0.1 (living document)
+**Version:** 0.2 (living document)
 
-This document outlines the conceptual data model and schema roadmap for ClauseWise.
-The `users`, `accounts`, `sessions`, `verification_tokens`, and `documents` tables
-have been formally defined and migrated in PostgreSQL using Drizzle ORM (Phase 0 and Phase 1).
-Downstream entities (sections, chunks, findings, actions, conversations) and processing-specific
-columns are scheduled for implementation in subsequent phases.
+This document outlines the conceptual data model and implemented PostgreSQL schema for ClauseWise (`lib/db/schema.ts`, Drizzle migrations `0000_dusty_hemingway.sql` through `0009_great_vision.sql`).
+
+### Schema Implementation Summary
+
+| Entity | PostgreSQL Table (`lib/db/schema.ts`) | Status | Notes |
+|---|---|---|---|
+| `User`, `Account`, `Session`, `VerificationToken` | `user`, `account`, `session`, `verification_token` | **Implemented** | NextAuth.js v5 identity and session tables (`0000`) |
+| `Document` | `document` | **Implemented** | Uploaded file metadata, lifecycle status, classification, parties, governing law, jurisdiction (`0000`, `0001`, `0002`, `0004`, `0008`) |
+| `DocumentSection` | `document_sections` | **Implemented** | Logical sections/clauses with sequential `order_index` and PDF page bounds (`0002`, `0008`) |
+| `DocumentChunk` | `document_chunks` | **Implemented** | Retrieval chunks with `vector(768)` embeddings (`nomic-embed-text`, migrated in `0003`, `0005`, `0008`, `0009`) |
+| `DocumentFinding` | `document_findings` | **Implemented** | Unified evidence-backed intelligence unit covering `key_term`, `attention`, `obligation`, `ambiguity`, `date`, `financial_term`, `inconsistency`, and `missing_information` (`0004`) |
+| `Obligation` & `ImportantDate` | Modeled via `document_findings` | **Implemented via `document_findings`** | Stored as `finding_type = 'obligation'` and `finding_type = 'date'` (with typed `metadata` JSONB) rather than separate tables |
+| `Conversation` & `Message` | `conversations`, `messages` | **Implemented** | Persistent document-scoped Q&A threads and messages with verified `citations` JSONB (`0006`) |
+| `Action` | `actions` | **Implemented** | User-controlled review checklist items (`open` / `completed`, `completed_at`) linked to documents and findings (`0007`) |
+| `Comparison` & `ComparisonDifference` | Computed on-demand (`comparison-service.ts`) | **Implemented On-Demand (No Table)** | Computed deterministically on demand over `document_sections` and `document_findings` (Phase 9 design decision) |
 
 ---
 
 ## 1. Entity Overview
 
 ```
-User
- └─ Document (many)
-      ├─ DocumentSection (many)
-      │    └─ DocumentChunk (many) ── [pgvector embedding]
-      ├─ DocumentFinding (many) ── references section/chunk/page
-      ├─ Obligation (many) ── a specialisation of Finding
-      ├─ ImportantDate (many) ── a specialisation of Finding
-      ├─ Conversation (many)
-      │    └─ Message (many)
-      └─ Action (many)
+User (Implemented: user)
+ └─ Document (many, Implemented: document)
+      ├─ DocumentSection (many, Implemented: document_sections)
+      │    └─ DocumentChunk (many, Implemented: document_chunks) ── [pgvector vector(768)]
+      ├─ DocumentFinding (many, Implemented: document_findings) ── references section/chunk/page
+      │    ├─ Specialisations in metadata: obligation, date, financial_term, missing_information
+      ├─ Conversation (many, Implemented: conversations)
+      │    └─ Message (many, Implemented: messages)
+      └─ Action (many, Implemented: actions)
 
-Comparison
- ├─ references Document A
- ├─ references Document B
- └─ ComparisonDifference (many) ── references sections in A and B
+Comparison (Implemented On-Demand in lib/services/comparison-service.ts)
+ ├─ aligns Document A sections & metadata
+ ├─ aligns Document B sections & metadata
+ └─ emits SectionDifference items (modified, added, removed, unchanged)
 ```
 
 ---
 
 ## 2. Entity Definitions
 
-### User
+### User (`user`) — **Implemented**
 Represents an application user.
 
 | Field | Type | Notes |
 |---|---|---|
 | `id` | UUID | Primary key |
-| `email` | string | Unique |
-| `created_at` | timestamp | |
-| `updated_at` | timestamp | |
+| `name` | text | Optional display name |
+| `email` | text | Unique, not null |
+| `email_verified` | timestamp | Optional |
+| `image` | text | Optional avatar URL |
+| `password` | text | Hashed with `bcryptjs`; null for OAuth accounts |
+| `created_at` | timestamp | Default `now()` |
+| `updated_at` | timestamp | Default `now()` |
 
-*Authentication is included in Phase 0 (NextAuth.js v5). The `User` table is
-managed by NextAuth alongside its `Session`, `Account`, and `VerificationToken`
-tables. Every request to the application has a verified `session.user.id`.*
+*Authentication is implemented in Phase 0 (NextAuth.js v5). The `user` table is managed alongside `session`, `account`, and `verification_token` tables. Every protected request to the application has a verified `session.user.id`.*
 
 ---
 
-### Document
+### Document (`document`) — **Implemented**
 Represents an uploaded legal document.
 
 | Field | Type | Notes |
 |---|---|---|
 | `id` | UUID | Primary key |
-| `user_id` | UUID | FK → User |
-| `title` | string | User-editable display name |
-| `original_filename` | string | Sanitized original name |
-| `storage_path` | string | Path in Supabase Storage (never exposed to browser) |
-| `mime_type` | string | `application/pdf` or `application/vnd.openxmlformats...` |
-| `file_size_bytes` | integer | |
+| `user_id` | UUID | FK → `user(id)` (`onDelete: cascade`) |
+| `title` | text | User-editable display name |
+| `original_filename` | text | Sanitized original name |
+| `storage_path` | text | Path in Supabase Storage (never exposed to browser) |
+| `mime_type` | text | `application/pdf` or `application/vnd.openxmlformats...` |
+| `file_size_bytes` | integer | Validated $\le 10\text{ MB}$ |
 | `status` | enum | `queued`, `extracting`, `extracted`, `chunking`, `analyzing`, `ready`, `error` |
-| `error_message` | string | Populated when `status = error`; not exposed verbatim to users |
-| `document_type` | string | e.g. `employment_agreement`, `nda`, `lease` |
-| `page_count` | integer | Extracted during processing |
-| `parties` | jsonb | Array of identified party names |
-| `governing_law` | string | Jurisdiction or governing law clause, if found (e.g. "New York", "England and Wales") |
-| `jurisdiction` | string | Court or arbitration jurisdiction, if stated separately from governing law |
-| `metadata` | jsonb | Flexible key-value bag for any additional extracted metadata |
-| `created_at` | timestamp | |
-| `updated_at` | timestamp | |
+| `error_message` | text | Populated when `status = error`; not exposed verbatim to users |
+| `document_type` | text | e.g. `nda`, `employment_agreement`, `lease_agreement`, `service_agreement` |
+| `page_count` | integer | Extracted during processing (PDF only; null for DOCX/TXT) |
+| `parties` | jsonb | Array of `{ name: string, role: string \| null }` |
+| `governing_law` | text | Governing law clause if stated (e.g., "State of New York", "State of Delaware") |
+| `jurisdiction` | text | Court or arbitration jurisdiction if stated |
+| `metadata` | jsonb | Structured bag (e.g., `executiveSummary`, `classification`, `importantSections`) |
+| `created_at` | timestamp | Default `now()` |
+| `updated_at` | timestamp | Default `now()` |
 
-*Implementation status (Phase 1, 2, & 3): `id`, `user_id`, `title`, `original_filename`, `storage_path`, `mime_type`, `file_size_bytes`, `page_count`, `status` (initial value: `queued`), `error_message`, `document_type`, `parties`, `governing_law`, `jurisdiction`, `metadata`, `created_at`, and `updated_at` are implemented in Drizzle ORM (`lib/db/schema.ts`) and fully migrated (`0004_flawless_maximus.sql`).*
+*Indexes:* `idx_documents_user_id`, `idx_documents_status`, `idx_documents_created_at`.
 
 ---
 
-### DocumentSection
+### DocumentSection (`document_sections`) — **Implemented**
 A logical section within a document (e.g., a numbered clause, a heading).
 Implemented in PostgreSQL via Drizzle ORM table `document_sections` (Phase 2 Slice 2.2).
 
 | Field | Type | Notes |
 |---|---|---|
 | `id` | UUID | Primary key |
-| `document_id` | UUID | FK → Document (`onDelete: cascade`) |
+| `document_id` | UUID | FK → `document(id)` (`onDelete: cascade`) |
 | `order_index` | integer | 0-indexed sequence within document |
-| `section_number` | integer | Section number or identifier matching order_index |
-| `title` | string | Section heading or generated label |
+| `section_number` | integer | Section number or identifier matching `order_index` |
+| `title` | text | Section heading or generated label |
 | `content` | text | Raw extracted text for this section |
 | `page_start` | integer | 1-indexed starting page (PDF only; null for DOCX/TXT) |
 | `page_end` | integer | 1-indexed ending page (PDF only; null for DOCX/TXT) |
 | `created_at` | timestamp | Creation timestamp |
 | `updated_at` | timestamp | Last update timestamp |
 
+*Indexes:* `idx_document_sections_document_id`, `idx_document_sections_order_index` on `(document_id, order_index)`.
+
 ---
 
-### DocumentChunk
-A vector-searchable chunk of text derived from a section.
+### DocumentChunk (`document_chunks`) — **Implemented**
+A vector-searchable chunk of text derived deterministically from a section.
 
 | Field | Type | Notes |
 |---|---|---|
 | `id` | UUID | Primary key |
-| `document_id` | UUID | FK → Document |
-| `section_id` | UUID | FK → DocumentSection (nullable) |
-| `chunk_index` | integer | Sequence within document |
-| `content` | text | Chunk text (max ~500 tokens) |
-| `embedding` | vector(1536) | OpenAI text-embedding-3-small output |
-| `page_number` | integer | Page this chunk primarily falls on |
-| `token_count` | integer | Approximate token count |
-| `created_at` | timestamp | |
+| `document_id` | UUID | FK → `document(id)` (`onDelete: cascade`) |
+| `section_id` | UUID | FK → `document_sections(id)` (`onDelete: cascade`) |
+| `chunk_index` | integer | 0-indexed global sequence within document |
+| `content` | text | Verbatim chunk text (default max 1500 chars) |
+| `embedding` | `vector(768)` | **Implemented (`0009_great_vision.sql`)**: Local Ollama `nomic-embed-text` 768-dimensional float vector (migrated from initial Phase 5 `vector(1536)`) |
+| `page_number` | integer | Source page reference propagated from `section.page_start` |
+| `token_count` | integer | Approximate token count heuristic (`Math.ceil(length / 4)`) |
+| `created_at` | timestamp | Default `now()` |
+| `updated_at` | timestamp | Default `now()` |
+
+*Indexes:* `idx_document_chunks_document_id`, `idx_document_chunks_section_id`.
 
 ---
 
-### DocumentFinding
-The central intelligence unit. Represents a single AI-identified finding
-within a document. Implemented in PostgreSQL via Drizzle ORM table `document_findings` (Phase 3).
+### DocumentFinding (`document_findings`) — **Implemented**
+The central intelligence unit. Represents a single AI-identified finding within a document. Implemented in PostgreSQL via Drizzle ORM table `document_findings` (Phase 3).
 
 | Field | Type | Notes |
 |---|---|---|
 | `id` | UUID | Primary key |
-| `document_id` | UUID | FK → Document (`onDelete: cascade`) |
-| `section_id` | UUID | FK → DocumentSection (nullable, `onDelete: cascade`) |
-| `chunk_id` | UUID | FK → DocumentChunk (nullable, `onDelete: set null`) — for RAG traceability |
-| `finding_type` | enum | See taxonomy below |
-| `label` | string | Short human-readable label |
-| `summary` | text | Plain-English explanation |
-| `source_text` | text | Verbatim excerpt from document (evidence; null for `missing_information`) |
-| `page_number` | integer | Source page (propagated from section or chunk) |
+| `document_id` | UUID | FK → `document(id)` (`onDelete: cascade`) |
+| `section_id` | UUID | FK → `document_sections(id)` (nullable, `onDelete: cascade`) |
+| `chunk_id` | UUID | FK → `document_chunks(id)` (nullable, `onDelete: set null`) — for RAG traceability |
+| `finding_type` | enum | Canonical taxonomy below |
 | `importance` | enum | `needs_attention`, `important`, `informational` |
-| `metadata` | jsonb | Type-specific data (e.g. expectedTopic, ruleBasis) |
-| `created_at` | timestamp | |
-| `updated_at` | timestamp | |
+| `label` | text | Short human-readable label |
+| `summary` | text | Plain-English explanation |
+| `source_text` | text | Verbatim excerpt from document (evidence; strictly `null` for `missing_information`) |
+| `page_number` | integer | 1-indexed source page resolved from persisted section/chunk |
+| `metadata` | jsonb | Type-specific data (e.g., `dateValue`, `amount`, `expectedTopic`, `ruleBasis`) |
+| `created_at` | timestamp | Default `now()` |
+| `updated_at` | timestamp | Default `now()` |
 
-**Finding type taxonomy:**
+*Indexes:* `idx_document_findings_document_id`, `idx_document_findings_finding_type`, `idx_document_findings_importance`.
+
+**Canonical `finding_type` taxonomy:**
 
 > **Design rule:** `finding_type` describes the *category* of the finding.
 > The `importance` column (`needs_attention` / `important` / `informational`)
@@ -149,156 +166,104 @@ within a document. Implemented in PostgreSQL via Drizzle ORM table `document_fin
 | `date` | Important date or deadline with a value or formula stated in the document |
 | `financial_term` | Fee, penalty, payment, salary, or monetary value stated in the document |
 | `inconsistency` | Apparent conflict between two provisions, supported by evidence from both |
-| `missing_information` | An expected core provision is absent given the document type and grounded in the Core Provision Catalog (carries null `source_text` and null `section_id`) |
+| `missing_information` | An expected core provision is absent given the document type and grounded in the Core Provision Catalog (carries `null` `source_text` and `null` `section_id`) |
 
 ---
 
-### Obligation
-A structured representation of a specific obligation extracted from the document.
-May be modelled as a specialised finding or a separate table.
+### Obligation & ImportantDate — **Implemented via `DocumentFinding` (No Separate Table)**
+In the conceptual model, `Obligation` and `ImportantDate` were sketched as candidate specialized tables. In the implemented Drizzle schema (`lib/db/schema.ts`), they are unified inside `document_findings`:
+- **Obligations** are persisted with `finding_type = 'obligation'`, verbatim `source_text`, `section_id`, `page_number`, and optional party metadata in `metadata`.
+- **Important Dates** are persisted with `finding_type = 'date'`, verbatim `source_text`, `section_id`, `page_number`, and `metadata: { dateValue, dateDescription }`, and surfaced in the Workspace via `FormattedDatesList`.
+- **Financial Terms** follow the same pattern (`finding_type = 'financial_term'`, `metadata: { amount, currency, frequency }`, surfaced via `FormattedFinancialList`).
+
+---
+
+### Action (`actions`) — **Implemented**
+A user-controlled review checklist item derived from a finding or created manually per document (Phase 7, migration `0007_fluffy_iron_lad.sql`).
 
 | Field | Type | Notes |
 |---|---|---|
 | `id` | UUID | Primary key |
-| `document_id` | UUID | FK → Document |
-| `finding_id` | UUID | FK → DocumentFinding (optional) |
-| `obligated_party` | string | Who bears the obligation |
-| `description` | text | Plain-English description |
-| `source_text` | text | Verbatim excerpt |
-| `section_id` | UUID | FK → DocumentSection |
-| `due_date` | date | If applicable |
-| `created_at` | timestamp | |
+| `document_id` | UUID | FK → `document(id)` (`onDelete: cascade`) |
+| `finding_id` | UUID | FK → `document_findings(id)` (nullable, `onDelete: cascade`) |
+| `user_id` | UUID | FK → `user(id)` (`onDelete: cascade`) |
+| `title` | text | Short review item label (1–300 chars) |
+| `description` | text | Optional review notes (max 2000 chars) |
+| `status` | enum | **Implemented**: `open`, `completed` *(Conceptual draft also considered `in_progress`, `dismissed`)* |
+| `created_at` | timestamp | Default `now()` |
+| `updated_at` | timestamp | Default `now()` |
+| `completed_at` | timestamp | Set when transitioned to `completed`; cleared to `null` when reopened |
+
+*Indexes:* `idx_actions_user_id`, `idx_actions_document_id`, `idx_actions_finding_id`, `idx_actions_status`.
 
 ---
 
-### ImportantDate
-A structured date or deadline extracted from the document.
-
-| Field | Type | Notes |
-|---|---|---|
-| `id` | UUID | Primary key |
-| `document_id` | UUID | FK → Document |
-| `finding_id` | UUID | FK → DocumentFinding (optional) |
-| `label` | string | e.g. "Start Date", "Notice Period" |
-| `date_value` | date | Parsed date if deterministic |
-| `date_description` | text | If date is conditional/relative |
-| `source_text` | text | Verbatim excerpt |
-| `section_id` | UUID | FK → DocumentSection |
-| `created_at` | timestamp | |
-
----
-
-### Action
-A user-controlled review item derived from findings.
-
-| Field | Type | Notes |
-|---|---|---|
-| `id` | UUID | Primary key |
-| `document_id` | UUID | FK → Document |
-| `finding_id` | UUID | FK → DocumentFinding (nullable) |
-| `user_id` | UUID | FK → User |
-| `title` | string | Short review item label |
-| `description` | text | What needs to be done / reviewed |
-| `status` | enum | `open`, `in_progress`, `complete`, `dismissed` |
-| `created_at` | timestamp | |
-| `updated_at` | timestamp | |
-
----
-
-### Conversation
+### Conversation (`conversations`) — **Implemented**
 A document-scoped Q&A thread associated with a document and user.
 Implemented in PostgreSQL via Drizzle ORM table `conversations` (Phase 5 Slice 5.4, migration `0006_pale_ezekiel_stane.sql`).
 
 | Field | Type | Notes |
 |---|---|---|
-| `id` | UUID | Primary key (`gen_random_uuid()`) |
-| `document_id` | UUID | FK → `documents(id)` on delete cascade |
-| `user_id` | text | FK → `users(id)` on delete cascade |
-| `title` | text | Thread title (default: "New Conversation") |
+| `id` | UUID | Primary key |
+| `document_id` | UUID | FK → `document(id)` (`onDelete: cascade`) |
+| `user_id` | UUID | FK → `user(id)` (`onDelete: cascade`) |
+| `title` | text | Thread title (default: `"New Conversation"`) |
 | `created_at` | timestamp | Creation timestamp (`now()`) |
 | `updated_at` | timestamp | Last message / activity timestamp (`now()`) |
 
-*Indexes:*
-- `conversations_document_idx` on `(document_id)`
-- `conversations_user_idx` on `(user_id)`
-- `conversations_doc_user_idx` on `(document_id, user_id)`
+*Indexes:* `idx_conversations_document_id`, `idx_conversations_user_id`, `idx_conversations_user_doc`.
 
 ---
 
-### Message
+### Message (`messages`) — **Implemented**
 A single turn in a Conversation.
 Implemented in PostgreSQL via Drizzle ORM table `messages` (Phase 5 Slice 5.4, migration `0006_pale_ezekiel_stane.sql`).
 
 | Field | Type | Notes |
 |---|---|---|
-| `id` | UUID | Primary key (`gen_random_uuid()`) |
-| `conversation_id` | UUID | FK → `conversations(id)` on delete cascade |
+| `id` | UUID | Primary key |
+| `conversation_id` | UUID | FK → `conversations(id)` (`onDelete: cascade`) |
 | `role` | enum | `user`, `assistant` |
 | `content` | text | Message content / answer |
 | `citations` | jsonb | Array of authoritative `QaCitation` objects; strictly `null` for `user` role |
 | `has_sufficient_evidence` | boolean | Sufficiency flag; strictly `null` for `user` role |
 | `is_grounded` | boolean | Grounding flag; strictly `null` for `user` role |
 | `citation_validation_passed` | boolean | Citation verification flag; strictly `null` for `user` role |
-| `metadata` | jsonb | Optional metadata bag for turn numbers or analytics |
+| `metadata` | jsonb | Optional metadata bag (e.g., active `sectionId` for Phase 6 contextual Q&A) |
 | `created_at` | timestamp | Message creation timestamp (`now()`) |
 
 *Indexes & Ordering:*
-- `messages_conversation_idx` on `(conversation_id)`
-- `messages_convo_created_idx` on `(conversation_id, created_at)`
+- `idx_messages_conversation_id` on `(conversation_id)`
+- `idx_messages_convo_created` on `(conversation_id, created_at)`
 - Deterministic query ordering contract: `ORDER BY created_at ASC, id ASC`
 
 ---
 
-### Comparison
-A comparison between two documents.
-
-| Field | Type | Notes |
-|---|---|---|
-| `id` | UUID | Primary key |
-| `user_id` | UUID | FK → User |
-| `document_a_id` | UUID | FK → Document |
-| `document_b_id` | UUID | FK → Document |
-| `status` | enum | `processing`, `ready`, `error` |
-| `summary` | text | Overall comparison summary |
-| `created_at` | timestamp | |
-
----
-
-### ComparisonDifference
-A single identified difference between two documents.
-
-| Field | Type | Notes |
-|---|---|---|
-| `id` | UUID | Primary key |
-| `comparison_id` | UUID | FK → Comparison |
-| `difference_type` | enum | `added`, `removed`, `modified`, `value_changed` |
-| `label` | string | Short description |
-| `description` | text | Plain-English explanation |
-| `section_a_id` | UUID | FK → DocumentSection (nullable) |
-| `section_b_id` | UUID | FK → DocumentSection (nullable) |
-| `source_text_a` | text | Verbatim from document A |
-| `source_text_b` | text | Verbatim from document B |
-| `created_at` | timestamp | |
+### Comparison & ComparisonDifference — **Implemented On-Demand (Zero Schema Migrations)**
+In the initial conceptual model, `Comparison` and `ComparisonDifference` were sketched as candidate persistence tables. In Phase 9 (`lib/services/comparison-service.ts`, documented in [`docs/phases/09-comparison.md`](phases/09-comparison.md)), comparison is computed deterministically **on demand** over existing `document_sections`, `document_findings`, and `document` metadata:
+- Avoids stale comparison rows if a document is re-extracted or re-analyzed.
+- Emits structured `DocumentComparisonResult` containing `metadataDiffs` and `sectionDifferences` (`modified`, `added`, `removed`, `unchanged`) with verbatim excerpts and section/page coordinates for both Document A and Document B.
 
 ---
 
 ## 3. Key Relationships Summary
 
-- Every AI finding is tied to a document, and optionally to a section and chunk
-- Every finding carries verbatim `source_text` as evidence
-- Obligations and ImportantDates are specialised views of Findings
-- Actions reference Findings (user decides what to act on)
-- Messages carry citations back to sections
-- ComparisonDifferences reference sections in both documents
+- Every AI finding is tied to a `document`, and (for all substantive findings) to a verified `document_sections` row and `page_number`.
+- Every substantive finding carries verbatim `source_text` verified against the section content; `missing_information` findings carry `null` `source_text` and `null` `section_id`.
+- Obligations, Important Dates, and Financial Terms are specialized `finding_type` views inside `document_findings` with structured `metadata`.
+- Actions reference `document_findings` and preserve provenance back to the source section and quote.
+- Assistant `messages` carry verified `citations` (`chunkId`, `sectionId`, `pageNumber`, `sourceText`) back to `document_chunks` and `document_sections`.
+- On-demand comparisons reference sections and findings across Document A and Document B.
 
 ---
 
 ## 4. Design Decisions
 
-| Decision | Choice | Rationale |
+| Decision | Choice | Status & Rationale |
 |---|---|---|
-| Finding as central concept | Single `DocumentFinding` table with type enum | Flexible, queryable, consistent |
-| Verbatim source text on finding | Required field | Enforces evidence-backed principle |
-| `metadata` as jsonb | Type-specific extra fields | Avoids wide sparse tables |
-| Embeddings co-located with chunks | `embedding` column on `DocumentChunk` | pgvector in same DB, no extra service |
-| Obligations/Dates as separate tables | Yes | Structured querying (sort by date, filter by party) |
+| Finding as central concept | Single `document_findings` table with `finding_type` enum and `metadata` JSONB | **Implemented** — Unified querying, filtering, and provenance validation across all 8 finding types |
+| Verbatim source text on finding | Required for all substantive finding types; `null` enforced for `missing_information` | **Implemented** — Enforces the Evidence-First invariant and prevents fabricated citations |
+| Embeddings co-located with chunks | `embedding` column (`vector(768)`) on `document_chunks` | **Implemented** — Local Ollama `nomic-embed-text` (`768d`) co-located in PostgreSQL via `pgvector` |
+| Obligations & Dates representation | Stored in `document_findings` (`finding_type` + `metadata` JSONB) instead of separate tables | **Implemented** — Eliminates join duplication while preserving dedicated UI views (`FormattedDatesList`, `FormattedFinancialList`) |
+| Document Comparison storage | Computed deterministically on demand (`comparison-service.ts`) | **Implemented** — Zero schema drift and instant side-by-side alignment over `document_sections` |
+

@@ -4,30 +4,29 @@
 
 ---
 
-## 1. Threat Model Summary
+## 1. Threat Model & Control Status Summary
 
-| Threat | Source | Mitigation |
-|---|---|---|
-| Credential exposure | Secrets in source/browser | Server-only secrets; `.gitignore`; no env in client bundles |
-| Prompt injection | Malicious document content | Untrusted content isolation in prompts |
-| Malicious file upload | Attacker-controlled file | Type + MIME + size validation before storage |
-| Unauthorized document access | Missing ownership check | User ownership check on every document query |
-| API abuse | Unauthenticated endpoints | Rate limiting; session-based auth enforcement (Phase 0) |
-| Information disclosure | Stack traces in responses | Safe error handling; generic user-facing errors |
-| Data leakage | Over-logging | Avoid logging document content in production |
-| Supply chain | Malicious npm packages | Minimal dependencies; pnpm lockfile; audit |
+| Threat | Source | Mitigation | Implementation Status |
+|---|---|---|---|
+| Credential exposure | Secrets in source/browser | Server-only secrets (`lib/env.ts`); `.gitignore`; zero secrets in `.next/static` client bundles or `Dockerfile` build args | **Implemented** |
+| Prompt injection | Malicious document content | Untrusted content delimiters (`=== UNTRUSTED DOCUMENT ... ===`), JSON schema enforcement, deterministic excerpt verification | **Implemented** |
+| Malicious file upload | Attacker-controlled file | MIME, extension, 10 MB size limit, `%PDF-`/`%%EOF` magic bytes, OOXML ZIP inspection, and path sanitization before storage | **Implemented** |
+| Unauthorized document access | Cross-tenant ID enumeration | Strict `and(eq(id, docId), eq(userId, session.user.id))` queries with uniform anti-oracle `404` responses | **Implemented** |
+| Unauthenticated API access | Anonymous requests | NextAuth.js v5 JWT session checks (`401 Unauthorized` on API routes; `/sign-in` redirect on protected pages) | **Implemented** |
+| Application-level API rate limiting | High-frequency request abuse | Per-IP / per-user `429 Too Many Requests` rate limiting on AI and upload endpoints | **Planned** *(Edge payload cap `25 MB` in `Caddyfile` and `OLLAMA_NUM_PARALLEL=2` in `docker-compose.yml` are implemented)* |
+| Information disclosure | Stack traces / DB URLs in responses | Domain error wrappers with credential/URI redaction (`sanitizeErrorMessage`) and generic `500` client messages | **Implemented** |
+| Internal inference exposure | Unprotected local Ollama port | Loopback-only binding (`127.0.0.1:11434`) locally; unexposed internal Docker bridge network (`clausewise_internal`) in `docker-compose.yml` | **Implemented** |
 
 ---
 
-## 2. Secrets Management
+## 2. Secrets Management (Implemented)
 
 - All secrets in `.env.local` (never committed)
-- `.gitignore` must include: `.env`, `.env.local`, `.env.*.local`
-- `OPENAI_API_KEY` accessed only in server-side code
-- `DATABASE_URL` accessed only in server-side code
-- Supabase service key accessed only in server-side code
-- Next.js `NEXT_PUBLIC_` prefix used **only** for values safe to expose (e.g. Supabase public anon key for client-side storage URL construction — with RLS enforced)
-- No real secrets in example `.env.example`; use placeholder values only
+- `.gitignore` excludes `.env`, `.env.local`, `.env.*.local`
+- `DATABASE_URL`, `NEXTAUTH_SECRET`, `SUPABASE_SERVICE_ROLE_KEY`, `OLLAMA_BASE_URL`, and `OPENAI_API_KEY` are accessed exclusively in server-side modules (`lib/env.ts`, `lib/ai/ollama-client.ts`, `lib/ai/openai-client.ts`)
+- Client-bundle isolation (`assertOllamaServerEnvironment()` and `next build` bundle verification) guarantees zero server secrets leak into `.next/static`
+- `Dockerfile` multi-stage build accepts only public `NEXT_PUBLIC_*` and `NEXTAUTH_URL` build arguments; runtime secrets are injected strictly at container startup
+- No real secrets in `.env.example`; placeholder values only
 
 ---
 
@@ -104,85 +103,71 @@ if (!parsed.success) {
 
 Document text is user-provided and must be treated as untrusted:
 
-1. Document content is placed in a clearly delimited section of the prompt
+1. Document content is placed in a clearly delimited section of the prompt (`=== UNTRUSTED DOCUMENT CONTENT ===` / `=== UNTRUSTED DOCUMENT EVIDENCE START ===`)
 2. System prompt explicitly instructs the model to ignore any instructions in document content
 3. Structured output (JSON schema) is used to constrain model responses
-4. Responses are validated with Zod before rendering; raw AI output is never rendered
-5. No document content is concatenated directly into SQL queries (use parameterized queries / Drizzle ORM)
+4. Responses are validated with Zod and verified deterministically against persisted section/chunk text (`verifySectionExcerptEvidence` and `citedChunkIds` lookup) before rendering; raw AI output is never rendered
+5. No document content is concatenated directly into SQL queries (parameterized queries via Drizzle ORM)
 
 ---
 
-## 6. Document Ownership Isolation
+## 6. Document Ownership Isolation & Anti-Oracle Protection (Implemented)
 
-Before any document read, write, or AI operation:
+Before any document read, write, retrieval, Q&A, action, prep, or comparison operation:
 
 ```typescript
-// Every document access must check ownership
-const document = await db.query.documents.findFirst({
-  where: and(
-    eq(documents.id, documentId),
-    eq(documents.userId, currentUserId)  // ownership check
-  ),
-});
-
-if (!document) {
-  throw new NotFoundError('Document not found');
-}
+// Every document access checks ownership against session.user.id
+const [doc] = await db
+  .select()
+  .from(documents)
+  .where(
+    and(
+      eq(documents.id, cleanDocId),
+      eq(documents.userId, cleanUserId) // verified session.user.id
+    )
+  )
+  .limit(1);
 ```
 
-Authentication is included in Phase 0 (NextAuth.js). Every document access uses
-`session.user.id` from the verified server-side session. Never derive ownership
-from client-supplied data.
+- **Anti-Oracle Guarantee:** Across `retrieval-service.ts`, `qa-service.ts`, `conversation-service.ts`, `action-service.ts`, `preparation-service.ts`, and `comparison-service.ts`, querying a document, section, conversation, or action that belongs to another user throws the **exact same access error** (`404 Not Found: "Document not found or access denied"`) as querying a non-existent UUID. This prevents cross-tenant resource enumeration.
 
 ---
 
-## 7. Error Handling
+## 7. Error Handling (Implemented)
 
 **Server-side:**
 - Catch all errors in Server Actions and Route Handlers
-- Log full error (with stack) server-side only
-- Return generic, user-friendly error message to client
+- Redact connection strings (`postgres://...`), API keys (`sk-...`), and Bearer tokens via `sanitizeErrorMessage()` before logging
+- Return generic, user-friendly error messages to the client
 
 **Client-side:**
 - Never display raw error objects or stack traces
-- Display a human-readable message
-- Provide a recovery action where possible
-
-**Pattern:**
-```typescript
-try {
-  // operation
-} catch (error) {
-  console.error('[operation-name]', error); // server log only
-  return { error: 'Something went wrong. Please try again.' };
-}
-```
+- Render dedicated error boundaries (`app/error.tsx`, `app/(app)/error.tsx`, `DocumentErrorState`) with recovery actions
 
 ---
 
-## 8. Rate Limiting
+## 8. Rate Limiting & Edge Protection
 
-To be implemented in Phase 10, but the design must accommodate it:
-- Apply rate limiting to all AI-calling endpoints
-- Apply rate limiting to file upload endpoint
-- Consider per-IP and per-user limits
-- Return `429 Too Many Requests` with a `Retry-After` header
+- **Application-Level Rate Limiting — Planned (Not Yet Implemented):**
+  - Per-IP and per-user rate limiting returning `429 Too Many Requests` with a `Retry-After` header on AI-calling endpoints (`/api/documents/[documentId]/ask`, `/api/documents/[documentId]/conversations/.../messages`) and `/api/documents/upload` remains **Planned** for production rollout.
+- **Edge & Container Concurrency Controls — Implemented:**
+  - `Caddyfile` enforces `request_body { max_size 25MB }` at the reverse-proxy edge (returning `413 Payload Too Large` before oversized payloads reach Next.js) and bounds header/body timeouts.
+  - `docker-compose.yml` bounds Ollama concurrent inference queues via `OLLAMA_NUM_PARALLEL=2` and container CPU/memory limits.
 
 ---
 
-## 9. HTTP Security Headers
+## 9. HTTP Security Headers (Implemented)
 
-Production deployment must include:
+Configured in [`next.config.ts`](../next.config.ts) across all routes (`/(.*)`):
 
 ```
-Content-Security-Policy: default-src 'self'; ...
+Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'
 X-Frame-Options: DENY
 X-Content-Type-Options: nosniff
 Referrer-Policy: strict-origin-when-cross-origin
 Permissions-Policy: camera=(), microphone=(), geolocation=()
 ```
 
-Configure in `next.config.ts` headers.
 
 ---
 

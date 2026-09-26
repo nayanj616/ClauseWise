@@ -2,6 +2,9 @@
 
 This document specifies the architecture, data contracts, and implementation guidelines for Phase 6 of ClauseWise: Contextual Assistant.
 
+> **Architecture Evolution Note (Post-Phase 10 Production Audit)**:
+> Following the Post-Phase 10 Production Audit (`drizzle/0009_great_vision.sql`), question embeddings use local **Ollama `nomic-embed-text` (`768` dimensions, `vector(768)`)** and answer streaming uses local **Ollama `qwen3:4b`** by default (with OpenAI `gpt-4o` retained as an optional text-generation adapter).
+
 ---
 
 ## Phase Overview
@@ -19,7 +22,7 @@ ClauseWise Phase 5 (Document-Grounded Q&A) provides the complete foundation for 
 
 | Interface / Component | Repository Location | Role in Phase 5 | Phase 6 Extension |
 |---|---|---|---|
-| `retrieveDocumentEvidence` / `semanticSearch` | `lib/services/retrieval-service.ts` | Question embedding via OpenAI `text-embedding-3-small`, pgvector similarity search, tenant isolation | Accepts optional `sectionId`. If provided, performs targeted vector search constrained to the selected section first, followed by same-document fallback if the section lacks sufficient evidence. |
+| `retrieveDocumentEvidence` / `semanticSearch` | `lib/services/retrieval-service.ts` | Question embedding via local Ollama `nomic-embed-text` (`768d`), pgvector similarity search, tenant isolation | Accepts optional `sectionId`. If provided, performs targeted vector search constrained to the selected section first, followed by same-document fallback if the section lacks sufficient evidence. |
 | `answerQuestion` | `lib/services/qa-service.ts` | Evidence-first answer generation, zero-LLM refusal on insufficient evidence, citation verification | Accepts optional `sectionId`. Passes it to retrieval, handles contextual insufficient evidence responses. |
 | `answerConversationQuestionStream` | `lib/services/qa-service.ts` | Multi-turn SSE streaming (`status`, `delta`, `complete`, `error`), bounded context (up to 3 turns) | Accepts optional `sectionId`. Incorporates active section context into prompt, tracks provenance when same-document fallback is used, and emits terminal complete event with contextual metadata. |
 | `appendUserMessage` / `appendAssistantMessage` | `lib/services/conversation-service.ts` | Multi-turn message persistence in PostgreSQL `messages` table | `appendUserMessage` accepts optional `metadata?: Record<string, unknown>` to record active `sectionId` context without requiring schema migrations. |

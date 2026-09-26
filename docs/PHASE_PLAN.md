@@ -10,7 +10,7 @@ is complete and passing tests.
 
 ---
 
-## Phase 0 — Foundation
+## Phase 0 — Foundation (✅ Complete)
 
 **Goal:** A working Next.js application with infrastructure in place, real
 user sessions, and document ownership enforced from day one.
@@ -453,97 +453,87 @@ highlights and scrolls to the source in the document viewer.
 
 ---
 
-## Phase 5 — Document-Grounded Q&A
+## Phase 5 — Document-Grounded Q&A (✅ Complete)
 
 **Goal:** Users can ask questions about their document and receive cited answers.
+**Documentation:** See [Phase 5 Specification](file:///c:/Users/jain_/Documents/PromptwarsExclusive/ClauseWise/docs/phases/05-qa.md)
 
 ### Deliverables
 
-**Domain service**
-- `retrieval-service.ts`
-  - `semanticSearch()` — embed query, pgvector similarity search, return top-k chunks
-- `qa-service.ts`
-  - `answerQuestion()` — retrieve → compose prompt → call OpenAI → validate → return with citations
+**Database (`lib/db/schema.ts`, `drizzle/0005_loud_gargoyle.sql`, `drizzle/0009_great_vision.sql`)**
+- `conversations` table (`id`, `document_id`, `user_id`, `title`, timestamps)
+- `messages` table (`id`, `conversation_id`, `role`, `content`, `citations` JSONB, `has_sufficient_evidence`, `is_grounded`, `metadata` JSONB, `created_at`)
+- `document_chunks.embedding` migrated in `0009_great_vision.sql` to `vector(768)` for local Ollama `nomic-embed-text` (`768d`) similarity search
 
-**Database**
-- `Conversation` schema
-- `Message` schema
-- Drizzle migration
+**Domain Services**
+- `lib/services/retrieval-service.ts`:
+  - `retrieveDocumentEvidence()` & `semanticSearch()` — embeds user query (`768d`), executes `pgvector` cosine similarity search (`1 - (embedding <=> queryVector)`), enforces strict tenant + document isolation, and filters by `minSimilarity` (default `0.20`, `topK = 5`).
+- `lib/services/qa-service.ts`:
+  - `answerQuestion()` & `answerConversationQuestionStream()` — enforces pre-LLM evidence gate (zero-LLM refusal when `chunks.length === 0`), structured output validation, and post-LLM `verifyAndNormalizeCitations()` against retrieved database chunks (`citationValidationPassed`).
+  - Demonstrated NDA workflow: asking *"What is the governing law of this agreement?"* retrieves Section 4 (`Governing Law`) and returns a grounded answer with a verified citation to **Page 2**.
+- `lib/services/conversation-service.ts`:
+  - Multi-turn thread creation, message persistence, bounded 3-turn history window, and conversation clearing.
 
-**API**
-- `POST /api/chat` — streaming or non-streaming response with citations
+**API Routes**
+- `POST /api/documents/[documentId]/ask` — single-turn grounded Q&A with verified citations.
+- `GET/POST /api/documents/[documentId]/conversations` — list or initialize document conversation threads.
+- `GET/DELETE /api/documents/[documentId]/conversations/[conversationId]` — load or clear thread history.
+- `POST /api/documents/[documentId]/conversations/[conversationId]/messages` — multi-turn SSE streaming (`status`, `delta`, `complete`, `error`).
 
-**UI**
-- Right panel: Ask tab
-- Chat interface (message list + input)
-- Citation display (section reference, page, excerpt)
-- "Not enough information" state
-- Loading state per message
+**UI (`components/workspace/AskPanel.tsx`)**
+- Document-scoped **Ask** tab with chat history, streaming token preview, insufficient-evidence refusal banner, verified citation cards (without exposing raw similarity scores), and one-click jump to highlighted `<mark>` text in `DocumentViewer`.
 
 **Tests**
-- Unit: `semanticSearch()` returns ranked chunks (mock pgvector)
-- Unit: Zod schema for Q&A response
-- Integration: question → retrieval → answer (mock OpenAI)
-- Security: prompt injection in question — should be handled safely
-- E2E: ask a question → receive cited answer → citation links to section
+- Unit: `tests/unit/retrieval-service.test.ts`, `tests/unit/qa-service.test.ts`, `tests/unit/qa-routes.test.ts`, `tests/unit/conversation-service.test.ts`, `tests/unit/conversation-routes.test.ts`, `tests/unit/ask-panel.test.tsx`.
+- E2E: `tests/e2e/qa-flow.spec.ts` and `tests/e2e/conversation-streaming-flow.spec.ts`.
 
 ---
 
-## Phase 6 — Context-Aware Assistant
+## Phase 6 — Context-Aware Assistant (✅ Complete)
 
-**Goal:** The Ask tab is upgraded with context awareness, clause explanation,
-and suggested questions.
+**Goal:** The Ask tab is upgraded with section context awareness, clause explanation, and contextual starter questions.
+**Documentation:** See [Phase 6 Specification](file:///c:/Users/jain_/Documents/PromptwarsExclusive/ClauseWise/docs/phases/06-assistant.md)
 
 ### Deliverables
 
-**Domain service**
-- `qa-service.ts` extended:
-  - `explainClause()` — explain selected section in plain English
-  - `suggestQuestions()` — generate relevant questions for this document type
-  - Conversation history in prompt context (last N turns)
+**Domain Services (`lib/services/retrieval-service.ts` & `lib/services/qa-service.ts`)**
+- Extended `retrieveDocumentEvidence()`, `answerQuestion()`, and `answerConversationQuestionStream()` with optional `sectionId` scoping.
+- Two-stage contextual retrieval: searches within the selected `sectionId` first (`section_scoped`), and transparently falls back to whole-document retrieval (`document_fallback`) if the selected section lacks sufficient evidence (`usedFallbackScope: true`).
+- Persists `{ sectionId }` in `messages.metadata` without extra schema migrations.
 
-**UI**
-- Suggested question chips above chat input
-- "Explain this clause" button on section navigation
-- Conversation history displayed correctly
-- Clear conversation action
+**UI (`components/workspace/DocumentViewer.tsx`, `AskPanel.tsx`, `DocumentWorkspace.tsx`)**
+- **"Ask about this section"** action button on every section header in `DocumentViewer`, switching to the `Ask` tab with that section pre-selected.
+- Active section context pill, section selector dropdown, clear-context button, contextual starter prompt chips, and fallback scope provenance badges in `AskPanel`.
 
 **Tests**
-- Unit: conversation history truncation (too long)
-- E2E: click "Explain this clause" → plain-English explanation appears with source
+- Unit: `tests/unit/contextual-assistant.test.ts` and `tests/unit/contextual-ask-panel.test.tsx`.
+- E2E: `tests/e2e/contextual-assistant-flow.spec.ts`.
 
 ---
 
-## Phase 7 — Action Center
+## Phase 7 — Action Center (✅ Complete)
 
-**Goal:** Users can convert findings into review items and manage a checklist.
+**Goal:** Users can convert findings into actionable review items and manage a cross-document checklist.
+**Documentation:** See [Phase 7 Specification](file:///c:/Users/jain_/Documents/PromptwarsExclusive/ClauseWise/docs/phases/07-actions.md)
 
 ### Deliverables
 
-**Database**
-- `Action` schema
-- Drizzle migration
+**Database (`lib/db/schema.ts`, `drizzle/0007_Actions.sql`)**
+- `actions` table (`id`, `user_id`, `document_id`, `finding_id`, `section_id`, `conversation_id`, `message_id`, `title`, `description`, `category`, `priority`, `status` [`open` | `completed`], `source_context`, timestamps) with partial unique index preventing duplicate finding-derived actions.
 
-**Domain service**
-- `action-service.ts`
-  - `createAction()` — from finding or manual
-  - `updateActionStatus()`
-  - `listActions()` — by document or all
+**Domain Service (`lib/services/action-service.ts`)**
+- `createActionFromFinding()` (idempotent finding-to-action conversion), `createManualAction()`, `listUserActions()`, `listDocumentActions()`, `updateActionStatus()`, and `deleteAction()` with strict anti-oracle ownership checks.
 
-**API / Server Actions**
-- Create action from finding
-- Update action status
-- Delete action
+**API Routes**
+- `GET /api/actions`, `POST /api/actions`, `PATCH /api/actions/[actionId]`, `DELETE /api/actions/[actionId]`, and `GET /api/documents/[documentId]/actions`.
 
-**UI**
-- Finding card: "Add to review list" button
-- Action Center page: checklist with status badges
-- Inline status update (open → in progress → complete → dismissed)
-- Filter by document / status
+**UI (`components/actions/` & `components/workspace/FindingCard.tsx`)**
+- **"Save to Action Center"** (`+` / `Saved to Actions`) trigger on every `FindingCard` with instant optimistic feedback and workspace header badge counter update.
+- Global `/actions` page (`ActionCenterView`, `ActionCard`, `CreateActionDialog`) with status tabs (`All`, `Open`, `Completed`), document/category/priority filters, manual action modal, and deep-link navigation back to source workspace sections.
 
 **Tests**
-- Integration: create action → persisted → status updates correctly
-- E2E: add finding to review list → appears in Action Center → mark complete
+- Unit: `tests/unit/action-service.test.ts`, `tests/unit/action-routes.test.ts`, `tests/unit/action-ui.test.tsx`.
+- E2E: `tests/e2e/actions-flow.spec.ts`.
 
 ---
 
@@ -585,6 +575,7 @@ and suggested questions.
 ## Phase 9 — Document Comparison (✅ Complete)
 
 **Goal:** Users can compare two documents and see meaningful, source-referenced differences side by side.
+**Documentation:** See [Phase 9 Specification](file:///c:/Users/jain_/Documents/PromptwarsExclusive/ClauseWise/docs/phases/09-comparison.md)
 
 ### Deliverables
 
@@ -625,7 +616,7 @@ and suggested questions.
 
 ---
 
-## Phase 10 — Accessibility, Security, Performance, Testing & Polish
+## Phase 10 — Accessibility, Security, Performance, Testing & Polish (✅ Complete)
 
 **Goal:** Competition-ready quality pass.
 **Status:** ✅ Complete & Verified
@@ -663,11 +654,27 @@ and suggested questions.
 
 ---
 
+## Post-Phase 10 — Local AI Migration & Production Audit Status (Attempt 2 Baseline)
+
+Following Phase 10, a Production Audit ([`docs/PRODUCTION_AUDIT.md`](file:///c:/Users/jain_/Documents/PromptwarsExclusive/ClauseWise/docs/PRODUCTION_AUDIT.md)) migrated ClauseWise to a local Ollama default provider and added container deployment artifacts (`53` unit test files / `824` unit tests and `9` Playwright E2E spec files):
+
+| Capability / Workstream | Status | Notes |
+|---|---|---|
+| **Public Landing Page (`app/page.tsx`)** | **Implemented** | Public entry route explaining `EVIDENCE → MEANING → ACTION` with navigation to `/sign-in`, `/sign-up`, and `/dashboard`. |
+| **Local Ollama AI & `768d` Embeddings (`qwen3:4b` + `nomic-embed-text`)** | **Implemented** | Implemented in `lib/ai/ollama-client.ts`, `lib/embeddings/embeddings-client.ts`, and `drizzle/0009_great_vision.sql` (`vector(768)`). Verified end-to-end on a 2-page NDA with Governing Law Q&A citing **Page 2**. |
+| **Docker Compose + Caddy Deployment Configuration** | **Implemented (Config & Local Proxy Verified)** | `Dockerfile`, `docker-compose.yml`, `Caddyfile`, and `tests/unit/deployment-config.test.ts` implemented and validated locally with Caddy v2.9.1. |
+| **Dashboard Quick-Action Cards & Library Delete Action** | **Partially Implemented** | `/dashboard` displays live KPI counts and recent documents, while secondary quick-action cards (*Review Pending Clauses*, *Recent Comparisons*, *System Security*) have coming-soon badges. `/documents` lists documents and opens workspaces, while document deletion (`DELETE /api/documents/[id]`) is **Planned**. |
+| **Asynchronous Background Ingestion Queue & Status Polling** | **Planned** | `POST /api/documents/upload` currently executes extraction, embedding, and findings generation synchronously in-request. Moving ingestion to an async worker queue with `GET /api/documents/[id]/status` polling is planned for production scale. |
+| **Application-Level `429` Rate Limiting & HNSW Vector Index** | **Planned** | Per-user sliding-window `429` rate limiters on AI endpoints and `pgvector` HNSW indexing are planned for high-concurrency production. |
+| **Live Cloud / GPU VM Staging Deployment** | **Unverified** | Provisioning the external Linux/GPU VM, configuring public DNS/TLS (`APP_DOMAIN`), and executing the remote HTTPS smoke test remain pending explicit deployment approval. |
+
+---
+
 ## MVP Scope Summary
 
 | Included | Excluded |
 |---|---|
-| PDF + DOCX upload | OCR |
+| PDF + DOCX upload | OCR for scanned image PDFs |
 | Text extraction | Voice interface |
 | Section detection | Mobile app |
 | AI findings (analysis) | Enterprise multi-tenancy |
@@ -675,19 +682,20 @@ and suggested questions.
 | Action Center | Lawyer marketplace |
 | Professional Prep | Legal advice |
 | Document Comparison | Autonomous negotiation |
-| Accessible UI | Multiple LLM providers |
+| Accessible UI | Multiple simultaneous active LLM providers |
 
 ---
 
 ## Definition of Done (per phase)
 
-- [ ] Database migration applied
-- [ ] Domain service implemented and covered by tests
-- [ ] API / Server Action validated with Zod
-- [ ] UI renders correct states (loading, error, empty, success)
-- [ ] Relevant unit tests pass
-- [ ] Relevant E2E test passes
-- [ ] No secrets committed
-- [ ] `pnpm build` succeeds without errors
-- [ ] Documentation updated if architecture changed
+- [x] Database migration applied (`0000` through `0009`)
+- [x] Domain service implemented and covered by tests (`53` unit test files)
+- [x] API / Server Action validated with Zod
+- [x] UI renders correct states (loading, error, empty, success)
+- [x] Relevant unit tests pass (`824` unit tests across `53` suites)
+- [x] Relevant E2E test passes (`9` Playwright E2E spec files)
+- [x] No secrets committed
+- [x] `pnpm build` succeeds without errors
+- [x] Documentation updated if architecture changed
+
 

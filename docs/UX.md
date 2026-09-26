@@ -38,8 +38,9 @@ hiding limitations.
 
 ---
 
-## 3. Document Workspace Layout (Desktop)
+## 3. Document Workspace Layout (Conceptual & Implemented)
 
+### 3.1 Conceptual Three-Domain Model
 ```
 ┌────────────────────────────────────────────────────────────┐
 │ Header: ClauseWise logo | Document title | Actions         │
@@ -48,18 +49,27 @@ hiding limitations.
 │ Section  │ Document Viewer          │ Intelligence Panel  │
 │ Nav      │                          │                     │
 │          │ Rendered PDF / text      │ Tabs:               │
-│ § 1.     │                          │  Overview           │
-│ § 2.     │ Highlighted evidence     │  Analyze            │
-│ § 3.     │ when finding selected    │  Ask                │
+│ § 1.     │                          │  Overview / Analyze │
+│ § 2.     │ Highlighted evidence     │  Ask                │
+│ § 3.     │ when finding selected    │  Professional Prep  │
 │ ...      │                          │                     │
-│          │                          │ Finding cards       │
-│          │                          │ with source refs    │
 └──────────┴──────────────────────────┴─────────────────────┘
 ```
 
-- Left panel: ~15% width, collapsible
-- Center panel: ~50% width, scrollable
-- Right panel: ~35% width, tabbed, scrollable
+### 3.2 Implemented Workspace Layout (`/documents/[documentId]`)
+To maximize readability and prevent horizontal crowding across desktop (`1280px`–`1920px`) and mobile (`< 768px`) viewports, `DocumentWorkspace.tsx` and `DocumentHeader.tsx` implement a unified header with **four dedicated workspace views**:
+
+1. **`Intelligence & Findings` (`?tab=analysis`)**:
+   - Displays `DocumentOverview` (parties, governing law, jurisdiction, executive summary), `ImportantSections`, `AttentionItemsSummary`, `FormattedDatesList`, and `FormattedFinancialList`.
+   - Below the overview, renders a two-column **master-detail inspector**: filterable `FindingList` on the left and `EvidencePanel` on the right showing verbatim source quotes, page coordinates, `View in Document Text`, and `Add action`.
+2. **`Document Text` (`?tab=document`)**:
+   - Displays a two-column split (`DocumentViewer.tsx`): collapsible section navigation sidebar on the left and the verbatim section content reader on the right.
+   - Clicking `View in Document Text` on any finding or Q&A citation switches to this tab, selects the target section, scrolls to `<mark id="active-evidence-highlight">`, and focuses the highlighted passage.
+   - Each section header includes an `Ask about this section` action that opens the `Ask` tab scoped to that clause.
+3. **`Ask` (`?tab=ask`)**:
+   - Renders `AskPanel.tsx` with a conversation thread switcher, section context badge, SSE streaming response area (`role="status"`, `aria-live="polite"`), and verified citation cards (e.g., citing **Page 2** in the demonstrated NDA governing-law query) with `View in Document` jump buttons.
+4. **`Professional Prep` (`?tab=prep`)**:
+   - Renders `ProfessionalPrepTab.tsx` assembling the consultation briefing (document overview, key clauses, categorized findings, open review checklist items, neutral questions for legal counsel, and user Q&A history) with `Copy Briefing (Markdown)` and `Print / Save PDF` controls.
 
 ---
 
@@ -136,7 +146,7 @@ Must not break on:
 
 Mobile breakpoints:
 - Document Workspace collapses to stacked layout
-- Intelligence panel becomes a drawer / bottom sheet
+- Global navigation collapses into an accessible mobile drawer (`MobileNav.tsx`) with `Escape` key dismissal and scroll lock
 - Core functionality remains usable
 
 ---
@@ -154,33 +164,36 @@ Mobile breakpoints:
 
 ## 8. Loading and Processing States
 
-Document processing is multi-step. Show meaningful progress:
-
-```
-✓ File uploaded
-⏳ Extracting text...
-⏳ Analyzing document...
-✓ Ready
-```
-
-Do not use a single indefinite spinner for the full pipeline.
+- **Implemented**:
+  - Route-level accessible loading skeletons (`loading.tsx` with `role="status"` and `aria-busy="true"`) across Dashboard, Documents, Compare, Actions, and Workspace.
+  - Explicit workspace states in `WorkspaceStates.tsx` (`DocumentProcessingState`, `DocumentErrorState`, `EmptyContentState`, `DocumentNotFoundState`) driven by the canonical `DOCUMENT_STATUS` enum (`queued`, `extracting`, `extracted`, `chunking`, `analyzing`, `ready`, `error`).
+  - SSE streaming status phases (`retrieving_evidence`, `generating_answer`) announced via `aria-live="polite"` in `AskPanel`.
+- **Planned (With Async Upload Queue)**:
+  - Live step-by-step progress polling (`GET /api/documents/[id]/status`) during out-of-band upload processing:
+    ```
+    ✓ File uploaded
+    ⏳ Extracting text...
+    ⏳ Analyzing document...
+    ✓ Ready
+    ```
 
 ---
 
-## 9. Navigation
+## 9. Navigation (Implemented)
 
 ```
-Dashboard
-Documents
-  └─ Document Workspace (per document)
-Compare
-Actions
-Prepare (per document)
+/ (Public Landing Page)
+├── /sign-in & /sign-up
+└── Protected App Shell (Sidebar on desktop / MobileNav drawer on mobile)
+    ├── /dashboard
+    ├── /documents
+    │   └── /documents/[documentId] (Workspace tabs: analysis, document, ask, prep)
+    ├── /compare
+    └── /actions
 ```
 
-Global navigation: sidebar (desktop) or hamburger menu (mobile).
-Current page indicated clearly.
-Breadcrumbs on Document Workspace and Prepare pages.
+Global navigation: fixed left `Sidebar.tsx` on desktop (`>= md`) or hamburger drawer `MobileNav.tsx` on mobile (`< md`), with a keyboard-accessible `Skip to main content` link at the top of the layout.
+
 
 ---
 
