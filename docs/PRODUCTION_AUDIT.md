@@ -311,3 +311,57 @@ Before any production release or live verification, verify the following environ
    - **HTTP Status & Latency**: `200 OK` in `33,938 ms` (`~33.9s` on CPU)
    - **Validation Flags**: `hasSufficientEvidence: true`, `isGrounded: true`, `citationValidationPassed: true`, `citationsCount: 1`
    - **Grounded Answer**: *"The governing law of this agreement is the laws of the State of New York, as specified in Section 4 of the agreement."*
+
+---
+
+## 11. Dedicated VM + Docker Compose + Caddy Deployment Specification & Validation
+
+### 11.1 Deployment Artifacts Created
+
+| File | Purpose & Security Guarantees |
+|---|---|
+| [`.dockerignore`](file:///c:/Users/jain_/Documents/PromptwarsExclusive/ClauseWise/.dockerignore) | Excludes `.env`, `.env.*` (except `!.env.example`), `node_modules`, `.next`, coverage/test artifacts, and local database backups from the Docker build context. |
+| [`Dockerfile`](file:///c:/Users/jain_/Documents/PromptwarsExclusive/ClauseWise/Dockerfile) | Multi-stage `node:22-bookworm-slim` build (`deps` $\rightarrow$ `builder` $\rightarrow$ `runner`). Accepts only public build args (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_APP_URL`, `NEXTAUTH_URL`), prunes dev dependencies (`npm prune --omit=dev`), and runs `npx next start -p 3000` as non-root `USER node` (UID `1000`). Zero server secrets (`DATABASE_URL`, `NEXTAUTH_SECRET`, `SUPABASE_SERVICE_ROLE_KEY`, `OPENAI_API_KEY`) are declared or baked into any image layer. |
+| [`docker-compose.yml`](file:///c:/Users/jain_/Documents/PromptwarsExclusive/ClauseWise/docker-compose.yml) | Orchestrates `ollama`, `ollama-init`, `app`, and `caddy` on the internal `clausewise_internal` bridge network. Keeps `ollama` (`expose: ["11434"]`) and `app` (`expose: ["3000"]`) private with no host `ports:` published; persists models in `ollama_models:/root/.ollama`; enforces `ollama-init` (`service_completed_successfully`) to pull and verify `nomic-embed-text` and `qwen3:4b` before `app` starts; injects runtime secrets via `env_file`. |
+| [`Caddyfile`](file:///c:/Users/jain_/Documents/PromptwarsExclusive/ClauseWise/Caddyfile) | Terminates public HTTPS (`80`/`443`), enforces `request_body { max_size 25MB }`, enables `flush_interval -1` for unbuffered SSE token streaming on `/api/documents/:id/ask`, configures active health checks against `/api/auth/session`, and sets `transport http { dial_timeout 10s; response_header_timeout 300s; read_timeout 300s; write_timeout 300s }`. |
+| [`tests/unit/deployment-config.test.ts`](file:///c:/Users/jain_/Documents/PromptwarsExclusive/ClauseWise/tests/unit/deployment-config.test.ts) | `7` automated unit tests enforcing all Dockerfile, `.dockerignore`, `docker-compose.yml`, and `Caddyfile` security and architectural invariants (`53` test files, `824/824` unit tests passing). |
+
+---
+
+### 11.2 Caddy v2.9.1 Directive & Runtime Edge Validation
+
+- **Binary & Syntax Validation (`caddy v2.9.1`)**:
+  - Executed `caddy fmt --overwrite Caddyfile`, `caddy validate --config Caddyfile --adapter caddyfile`, and `caddy adapt --config Caddyfile --adapter caddyfile --pretty`.
+  - Result: **`Valid configuration` (`exit code 0`, `0` warnings)**.
+  - Verified JSON adaptation confirms:
+    - `request_body.max_size = 25000000` (`25 MB`)
+    - `reverse_proxy.flush_interval = -1` (low-latency unbuffered streaming)
+    - `reverse_proxy.transport = { protocol: "http", dial_timeout: 10s, response_header_timeout: 300s, read_timeout: 300s, write_timeout: 300s }`
+    - `servers.srv0 = { read_header_timeout: 15s, read_timeout: 60s, write_timeout: 300s, idle_timeout: 5m }`
+- **Live Local Edge Proxy Test (`Caddy v2.9.1` $\rightarrow$ `Next.js 15.0.8` on `127.0.0.1:3000`)**:
+  - `GET /` through Caddy reverse proxy $\rightarrow$ **`200 OK`**
+  - `GET /api/auth/session` through Caddy reverse proxy $\rightarrow$ **`200 OK`**
+  - `POST /api/documents/upload` with a `26 MB` payload through Caddy reverse proxy $\rightarrow$ **`413 Payload Too Large`** (rejected at the Caddy edge by `request_body { max_size 25MB }` before reaching Next.js).
+
+---
+
+### 11.3 Resource Limits, Disk Sizing & Inference-Time Considerations
+
+| Resource / Parameter | Container Limit (`docker-compose.yml`) | Host VM Recommendation & Operational Notes |
+|---|---|---|
+| **Ollama CPU & RAM (`ollama`)** | Limits: `8.0` vCPU, `12 GB` RAM; Reservations: `4.0` vCPU, `6 GB` RAM | `qwen3:4b` (`2.5 GB` weights) + `nomic-embed-text` (`274 MB` weights) require `~4.5–5.5 GB` resident memory during active context evaluation (`OLLAMA_NUM_PARALLEL=2`, `OLLAMA_KEEP_ALIVE=24h`). |
+| **Next.js App CPU & RAM (`app`)** | Limits: `2.0` vCPU, `2 GB` RAM; Reservations: `1.0` vCPU, `512 MB` RAM | Node.js event loop remains non-blocking (`~21–24 ms` response time on concurrent requests) while waiting on Ollama HTTP responses. |
+| **Caddy Reverse Proxy (`caddy`)** | Limits: `1.0` vCPU, `512 MB` RAM; Reservations: `0.25` vCPU, `128 MB` RAM | Handles TLS termination, `zstd`/`gzip` compression, and `25 MB` request body enforcement. |
+| **Persistent Disk (`ollama_models`)** | Named volume `/root/.ollama` | Minimum **`50 GB` NVMe SSD** recommended on the host (`~3.5 GB` for `qwen3:4b` + `nomic-embed-text`, plus Docker layers, OS, and logs). |
+| **CPU-Only vs. GPU Inference Latency** | `OLLAMA_TIMEOUT_MS=180000` (`180s`), Caddy `transport http` timeouts `= 300s` | On CPU-only VMs (`8–12` vCPU, `size_vram: 0`), a `2`-page PDF upload + findings pipeline takes **`~103–111s`** and grounded Q&A takes **`~30–34s`**. On GPU-equipped VMs (`1x NVIDIA T4 / L4`, `>= 8 GB` VRAM), uncomment `deploy.resources.reservations.devices` in `docker-compose.yml` to reduce upload latency to **`~8–15s`** and Q&A to **`~2–5s`**. |
+
+---
+
+### 11.4 Staging / Public Release Checklist (Pending Explicit Approval)
+
+- [x] Create and validate `Dockerfile`, `.dockerignore`, `docker-compose.yml`, and `Caddyfile`.
+- [x] Verify Caddy v2.9.1 syntax, JSON adaptation, and live edge reverse-proxy behavior (`200` on routes, `413` on `>25 MB` payload).
+- [x] Enforce automated unit tests (`tests/unit/deployment-config.test.ts`, `824/824` total tests passing).
+- [ ] **Pending Approval**: Provision target Linux VM (with Docker Engine + Docker Compose plugin installed and firewall restricted to `22/tcp`, `80/tcp`, `443/tcp`).
+- [ ] **Pending Approval**: Assign staging HTTPS hostname (`APP_DOMAIN`, `NEXTAUTH_URL`, `NEXT_PUBLIC_APP_URL`) and populate runtime `.env.production` (`chmod 600`) on the VM host.
+- [ ] **Pending Approval**: Run `docker compose up -d --build` on the staging VM, verify `ollama-init` completion, and execute the 4-step HTTPS staging smoke test.

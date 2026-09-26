@@ -1,0 +1,169 @@
+# ==============================================================================
+# ClauseWise — Production Docker Compose Topology (Dedicated VM + Co-Located Ollama)
+#
+# Security & Architecture Invariants:
+# 1. Public Entry Point: Only `caddy` publishes ports 80 and 443 to the host.
+# 2. Private Ollama: `ollama` has NO `ports:` mapping to the host; port 11434 is
+#    accessible exclusively over the private `clausewise_internal` bridge network.
+# 3. Model Readiness Gate: `ollama-init` pulls and verifies both `nomic-embed-text`
+#    (768d) and `qwen3:4b` in the persistent `ollama_models` volume before `app` starts.
+# 4. Runtime-Only Secrets: `DATABASE_URL`, `NEXTAUTH_SECRET`, and
+#    `SUPABASE_SERVICE_ROLE_KEY` are injected at runtime via `env_file` and are
+#    never passed as Docker build arguments.
+# ==============================================================================
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: clausewise-ollama
+    restart: unless-stopped
+    # SECURITY: Never publish 11434 to the host (no `ports:` block).
+    expose:
+      - "11434"
+    environment:
+      - OLLAMA_HOST=0.0.0.0:11434
+      - OLLAMA_KEEP_ALIVE=24h
+      - OLLAMA_NUM_PARALLEL=2
+    volumes:
+      - ollama_models:/root/.ollama
+    networks:
+      - clausewise_internal
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: "8.0"
+          memory: 12G
+        reservations:
+          cpus: "4.0"
+          memory: 6G
+          # Uncomment on GPU-equipped VMs (requires nvidia-container-toolkit):
+          # devices:
+          #   - driver: nvidia
+          #     count: 1
+          #     capabilities: [gpu]
+
+  ollama-init:
+    image: ollama/ollama:latest
+    container_name: clausewise-ollama-init
+    restart: "no"
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+      - OLLAMA_EMBEDDING_MODEL=${OLLAMA_EMBEDDING_MODEL:-nomic-embed-text}
+      - OLLAMA_CHAT_MODEL=${OLLAMA_CHAT_MODEL:-qwen3:4b}
+    networks:
+      - clausewise_internal
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        echo "[ollama-init] Pulling and verifying embedding model: $${OLLAMA_EMBEDDING_MODEL}..."
+        ollama pull "$${OLLAMA_EMBEDDING_MODEL}"
+        echo "[ollama-init] Pulling and verifying chat model: $${OLLAMA_CHAT_MODEL}..."
+        ollama pull "$${OLLAMA_CHAT_MODEL}"
+        echo "[ollama-init] Verifying models are registered..."
+        ollama list | grep -F "$${OLLAMA_EMBEDDING_MODEL}"
+        ollama list | grep -F "$${OLLAMA_CHAT_MODEL}"
+        echo "[ollama-init] Both models verified ready."
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      # Public build-time variables only — NEVER pass server secrets here
+      args:
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
+        NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3000}
+    container_name: clausewise-app
+    restart: unless-stopped
+    depends_on:
+      ollama-init:
+        condition: service_completed_successfully
+    # Internal port only — traffic enters via Caddy over `clausewise_internal`
+    expose:
+      - "3000"
+    env_file:
+      - ${ENV_FILE:-.env.local}
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - HOSTNAME=0.0.0.0
+      - AUTH_TRUST_HOST=true
+      - AI_PROVIDER=ollama
+      - EMBEDDING_PROVIDER=ollama
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - OLLAMA_CHAT_MODEL=${OLLAMA_CHAT_MODEL:-qwen3:4b}
+      - OLLAMA_EMBEDDING_MODEL=${OLLAMA_EMBEDDING_MODEL:-nomic-embed-text}
+      - OLLAMA_TIMEOUT_MS=${OLLAMA_TIMEOUT_MS:-180000}
+      # Explicitly empty OPENAI_API_KEY so no accidental cloud fallback occurs
+      - OPENAI_API_KEY=
+    networks:
+      - clausewise_internal
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/api/auth/session').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+        reservations:
+          cpus: "1.0"
+          memory: 512M
+
+  caddy:
+    image: caddy:2.9-alpine
+    container_name: clausewise-caddy
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      - APP_DOMAIN=${APP_DOMAIN:-localhost}
+      - ACME_EMAIL=${ACME_EMAIL:-admin@example.com}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - clausewise_internal
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+
+networks:
+  clausewise_internal:
+    driver: bridge
+
+volumes:
+  ollama_models:
+  caddy_data:
+  caddy_config:

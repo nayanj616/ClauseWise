@@ -1,0 +1,47 @@
+# ==============================================================================
+# ClauseWise — Caddy v2 Reverse Proxy & Automatic HTTPS Configuration
+# Validated against Caddy v2.9+ Caddyfile specification:
+# - https://caddyserver.com/docs/caddyfile/options#timeouts
+# - https://caddyserver.com/docs/caddyfile/directives/request_body
+# - https://caddyserver.com/docs/caddyfile/directives/reverse_proxy#streaming
+# - https://caddyserver.com/docs/caddyfile/directives/reverse_proxy#the-http-transport
+# ==============================================================================
+{
+	email {$ACME_EMAIL:admin@example.com}
+
+	servers {
+		timeouts {
+			read_header 15s
+			read_body 60s
+			write 300s
+			idle 5m
+		}
+	}
+}
+
+{$APP_DOMAIN:localhost} {
+	# Enforce 25 MB maximum upload size at the edge (returns HTTP 413 if exceeded)
+	request_body {
+		max_size 25MB
+	}
+
+	encode zstd gzip
+
+	reverse_proxy app:3000 {
+		# Disable response buffering for real-time SSE token streaming (/api/documents/:id/ask)
+		flush_interval -1
+
+		# Active upstream health check against NextAuth session endpoint
+		health_uri /api/auth/session
+		health_interval 30s
+		health_timeout 5s
+
+		# HTTP transport timeouts sized for CPU-bound PDF intelligence (~103-111s on CPU)
+		transport http {
+			dial_timeout 10s
+			response_header_timeout 300s
+			read_timeout 300s
+			write_timeout 300s
+		}
+	}
+}
